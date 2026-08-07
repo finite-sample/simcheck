@@ -1,0 +1,13 @@
+# Managed by copier — records template version for `copier update`. Do not edit.
+_commit: v1
+_src_path: py-canon
+author_email: gsood07@gmail.com
+author_name: Gaurav Sood
+coverage_floor: 0
+default_branch: main
+description: 'Monte Carlo tests for statistical estimators: unbiasedness, coverage,
+    size and power, with gates derived from the replicate count'
+needs_cli: false
+org: finite-sample
+package_name: simcheck
+project_name: simcheck
