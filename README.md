@@ -52,10 +52,12 @@ tell "broken" from "slightly miscalibrated" without rerunning anything.
 import numpy as np
 from simcheck import Estimate, monte_carlo, assert_coverage, assert_unbiased
 
+
 def replicate(rng):
     x = rng.normal(2.0, 1.0, 40)
     se = x.std(ddof=1) / np.sqrt(40)
     return Estimate(x.mean(), se, x.mean() - 1.96 * se, x.mean() + 1.96 * se)
+
 
 result = monte_carlo(replicate, truth=2.0, reps=2000, seed=11)
 assert_unbiased(result, "sample mean")
