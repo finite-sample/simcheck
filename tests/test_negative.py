@@ -21,6 +21,9 @@ rates are separate functions.
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import textwrap
 from itertools import pairwise
 
 import numpy as np
@@ -257,3 +260,66 @@ def test_an_empty_study_is_rejected():
             rejected=np.zeros(0, dtype=bool),
             truth=0.0,
         )
+
+
+def test_the_gates_still_fire_under_python_o():
+    """`python -O` must not turn every gate into a no-op.
+
+    ``assert`` statements are removed entirely under ``-O``. A package whose
+    entire product is assertions would then pass everything silently -- the exact
+    failure mode it exists to prevent, in itself. This was real: the first
+    version of the gates used bare ``assert`` and, under ``-O``, certified one
+    hit in four hundred replicates as acceptable 95% coverage.
+
+    Run in a subprocess because ``-O`` is a interpreter-startup flag; the test
+    session itself cannot toggle it.
+    """
+    program = textwrap.dedent("""
+        import sys
+        from simcheck import (
+            MonteCarloResult, assert_count_rate, assert_coverage,
+            assert_proportion, assert_se_calibrated, assert_unbiased,
+        )
+        import numpy as np
+
+        assert __debug__ is False, "subprocess is not running under -O"
+
+        fired = []
+        def check(name, fn):
+            try:
+                fn()
+            except AssertionError:
+                fired.append(name)
+
+        check("count_rate", lambda: assert_count_rate(1, 400, 0.95))
+        check("proportion", lambda: assert_proportion(0.10, 400, 0.95))
+
+        biased = MonteCarloResult(
+            estimates=np.linspace(5.0, 5.2, 400),
+            # A quarter of the true spread, so se_calibrated is unambiguously
+            # violated rather than sitting near its tolerance.
+            standard_errors=np.full(400, 0.015),
+            covered=np.zeros(400, dtype=bool),
+            rejected=np.zeros(400, dtype=bool),
+            truth=1.0,
+        )
+        check("unbiased", lambda: assert_unbiased(biased))
+        check("coverage", lambda: assert_coverage(biased, 0.95))
+        check("se_calibrated", lambda: assert_se_calibrated(biased))
+
+        print(",".join(sorted(fired)))
+    """)
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-O", "-c", program],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    fired = set(result.stdout.strip().split(","))
+    assert fired == {
+        "count_rate",
+        "coverage",
+        "proportion",
+        "se_calibrated",
+        "unbiased",
+    }, f"under -O only these gates fired: {sorted(fired)}"

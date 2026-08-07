@@ -17,6 +17,12 @@ failure of the estimator -- is not greater than one, so it was read as a *rate*
 of 1.0, which sits inside the band, and the test passed. The worst possible
 result was reported as the best possible one. There is no heuristic that
 distinguishes a count of 1 from a rate of 1.0; the caller has to say which.
+
+Every gate raises ``AssertionError`` explicitly rather than using an ``assert``
+statement. ``assert`` is removed entirely by ``python -O``, so a package whose
+whole product is assertions would silently pass everything under optimisation --
+the exact failure mode it exists to prevent, in itself. ``test_negative.py``
+runs the gates in an ``-O`` subprocess to keep it that way.
 """
 
 from __future__ import annotations
@@ -105,11 +111,12 @@ def assert_proportion(
             "count of successes, use assert_count_rate."
         )
     low, high = binomial_band(nominal, reps, sigmas)
-    assert low <= observed <= high, (
-        f"{label}: observed rate {observed:.4f} outside the {sigmas:g}-sigma "
-        f"band [{low:.4f}, {high:.4f}] for a nominal {nominal:.4f} "
-        f"over {reps} replicates"
-    )
+    if not low <= observed <= high:
+        raise AssertionError(
+            f"{label}: observed rate {observed:.4f} outside the {sigmas:g}-sigma "
+            f"band [{low:.4f}, {high:.4f}] for a nominal {nominal:.4f} "
+            f"over {reps} replicates"
+        )
 
 
 def assert_count_rate(
@@ -154,11 +161,12 @@ def assert_unbiased(
     Raises:
         AssertionError: If the bias t statistic exceeds the gate.
     """
-    assert abs(result.bias_t) < sigmas, (
-        f"{label}: bias {result.bias:+.6f} is {result.bias_t:+.2f} Monte Carlo "
-        f"standard errors from zero over {result.reps} replicates "
-        f"(sampling sd {result.sampling_sd:.6f}, mc se {result.mc_se:.6f})"
-    )
+    if not abs(result.bias_t) < sigmas:
+        raise AssertionError(
+            f"{label}: bias {result.bias:+.6f} is {result.bias_t:+.2f} Monte "
+            f"Carlo standard errors from zero over {result.reps} replicates "
+            f"(sampling sd {result.sampling_sd:.6f}, mc se {result.mc_se:.6f})"
+        )
 
 
 def assert_coverage(
@@ -207,12 +215,16 @@ def assert_se_calibrated(
     if tolerance <= 0:
         raise ValueError(f"tolerance must be positive, got {tolerance}")
     ratio = result.se_ratio
-    assert np.isfinite(ratio), (
-        f"{label}: the estimator did not vary across {result.reps} replicates, "
-        "so its reported standard error cannot be checked against anything"
-    )
-    assert abs(ratio - 1.0) <= tolerance, (
-        f"{label}: reported standard error is {ratio:.3f} times the observed "
-        f"spread ({result.reported_se:.6f} against {result.sampling_sd:.6f}) "
-        f"over {result.reps} replicates; tolerance is {tolerance:.2f}"
-    )
+    if not np.isfinite(ratio):
+        raise AssertionError(
+            f"{label}: the estimator did not vary across {result.reps} "
+            "replicates, so its reported standard error cannot be checked "
+            "against anything"
+        )
+    if abs(ratio - 1.0) > tolerance:
+        raise AssertionError(
+            f"{label}: reported standard error is {ratio:.3f} times the "
+            f"observed spread ({result.reported_se:.6f} against "
+            f"{result.sampling_sd:.6f}) over {result.reps} replicates; "
+            f"tolerance is {tolerance:.2f}"
+        )

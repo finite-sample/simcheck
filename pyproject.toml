@@ -73,10 +73,6 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 # Unused fixture arguments and private-member access are how tests are written.
 "tests/**" = ["S101", "D", "ARG", "SLF"]
-# `assert` is this package's product, not a debugging leftover: the gates are
-# assertions, and rewriting them as `if ...: raise AssertionError` would only
-# hide them from S101 while doing the same thing less readably.
-"src/simcheck/gates.py" = ["S101"]
 "docs/**" = ["D"]
 
 [tool.pyright]
