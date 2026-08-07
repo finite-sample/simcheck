@@ -83,6 +83,37 @@ def binomial_band(
     return max(0.0, nominal - spread), min(1.0, nominal + spread)
 
 
+def _band_failure(
+    observed: float, reps: int, nominal: float, sigmas: float
+) -> str | None:
+    """Describe how an observed rate misses its band, or None if it does not.
+
+    Reporting rather than raising is what lets every public gate below raise
+    AssertionError itself. A gate that delegated its raise to another function
+    would still be correct, but its documented exceptions could no longer be
+    checked against its body -- and the tooling that catches a docstring drifting
+    from its code would go quiet on exactly the functions whose whole job is
+    raising.
+
+    Args:
+        observed: The observed rate.
+        reps: Replicates it was computed over.
+        nominal: The claimed rate.
+        sigmas: Slack, in binomial standard errors.
+
+    Returns:
+        str | None: The failure message, or None when the rate is inside the band.
+    """
+    low, high = binomial_band(nominal, reps, sigmas)
+    if low <= observed <= high:
+        return None
+    return (
+        f"observed rate {observed:.4f} outside the {sigmas:g}-sigma "
+        f"band [{low:.4f}, {high:.4f}] for a nominal {nominal:.4f} "
+        f"over {reps} replicates"
+    )
+
+
 def assert_proportion(
     observed: float,
     reps: int,
@@ -110,13 +141,9 @@ def assert_proportion(
             f"observed must be a rate in [0, 1], got {observed}. If this is a "
             "count of successes, use assert_count_rate."
         )
-    low, high = binomial_band(nominal, reps, sigmas)
-    if not low <= observed <= high:
-        raise AssertionError(
-            f"{label}: observed rate {observed:.4f} outside the {sigmas:g}-sigma "
-            f"band [{low:.4f}, {high:.4f}] for a nominal {nominal:.4f} "
-            f"over {reps} replicates"
-        )
+    problem = _band_failure(observed, reps, nominal, sigmas)
+    if problem is not None:
+        raise AssertionError(f"{label}: {problem}")
 
 
 def assert_count_rate(
@@ -141,7 +168,9 @@ def assert_count_rate(
     """
     if not 0 <= successes <= reps:
         raise ValueError(f"successes must be in [0, {reps}], got {successes}")
-    assert_proportion(successes / reps, reps, nominal, label, sigmas)
+    problem = _band_failure(successes / reps, reps, nominal, sigmas)
+    if problem is not None:
+        raise AssertionError(f"{label}: {problem}")
 
 
 def assert_unbiased(
@@ -185,10 +214,18 @@ def assert_coverage(
 
     Raises:
         AssertionError: If coverage falls outside the band.
+        ValueError: If the study recorded no intervals, so there is no coverage
+            rate to test.
     """
-    assert_proportion(
-        result.coverage, result.reps, nominal, f"{label} coverage".strip(), sigmas
-    )
+    if result.covered is None:
+        raise ValueError(
+            f"{label or 'this study'} recorded no confidence intervals, so its "
+            "coverage cannot be checked. Have the estimator report `lower` and "
+            "`upper` on every replicate."
+        )
+    problem = _band_failure(result.coverage, result.reps, nominal, sigmas)
+    if problem is not None:
+        raise AssertionError(f"{f'{label} coverage'.strip()}: {problem}")
 
 
 def assert_se_calibrated(
