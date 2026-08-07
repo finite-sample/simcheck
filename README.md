@@ -44,6 +44,40 @@ assert_coverage(result, 0.95, "t interval")
 A failure says how far outside the band it fell, in standard errors, so you can
 tell "broken" from "slightly miscalibrated" without rerunning anything.
 
+## Running the study
+
+`monte_carlo` does the loop, and makes two decisions worth knowing about:
+
+```python
+import numpy as np
+from simcheck import Estimate, monte_carlo, assert_coverage, assert_unbiased
+
+def replicate(rng):
+    x = rng.normal(2.0, 1.0, 40)
+    se = x.std(ddof=1) / np.sqrt(40)
+    return Estimate(x.mean(), se, x.mean() - 1.96 * se, x.mean() + 1.96 * se)
+
+result = monte_carlo(replicate, truth=2.0, reps=2000, seed=11)
+assert_unbiased(result, "sample mean")
+assert_coverage(result, 0.95, "1.96 interval at n=40")
+```
+
+**Replicate *i* depends on `(seed, i)` and nothing else.** Each gets its own
+generator, spawned from a seed sequence rather than drawn from one shared
+stream. With a shared stream, replicate 400 depends on every draw before it: you
+cannot reproduce it alone, and raising the replicate count changes every
+existing replicate instead of adding to them. Here `reps=500` extends `reps=50`
+— the first fifty are identical, and a test asserts it.
+
+**A missing interval is an error, not a miss.** If your estimator reports no
+interval, the obvious implementation records `covered = False`, coverage comes
+out at 0.000, and the assertion fails with "outside the band" — which reads as a
+catastrophically broken estimator rather than a study that never measured
+coverage. `monte_carlo` records `covered = None` instead, and asking for the
+coverage rate raises and says why. An estimator that reports an interval only
+*sometimes* is rejected outright: averaging over that mixture is not a coverage
+rate.
+
 ## What it checks
 
 | Gate | Fails when |

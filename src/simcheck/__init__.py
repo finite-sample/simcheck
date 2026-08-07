@@ -57,6 +57,7 @@ from .gates import (
     binomial_band,
 )
 from .results import MonteCarloResult
+from .runner import Estimate, monte_carlo
 from .tiers import DEEP_REPS, FAST_REPS, deep_tier, reps_for
 
 try:
@@ -68,6 +69,7 @@ __all__ = [
     "DEEP_REPS",
     "FAST_REPS",
     "GATE_SIGMAS",
+    "Estimate",
     "MonteCarloResult",
     "__version__",
     "assert_count_rate",
@@ -77,5 +79,6 @@ __all__ = [
     "assert_unbiased",
     "binomial_band",
     "deep_tier",
+    "monte_carlo",
     "reps_for",
 ]

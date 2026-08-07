@@ -31,8 +31,12 @@ class MonteCarloResult:
     Args:
         estimates: The estimate from each replicate.
         standard_errors: The standard error the estimator reported on each replicate.
-        covered: Whether each replicate's interval contained the truth.
-        rejected: Whether each replicate rejected the null.
+        covered: Whether each replicate's interval contained the truth, or None
+            when the estimator reported no intervals. None rather than an array
+            of False: the latter reads as coverage of zero, which is a broken
+            estimator, not an absent measurement.
+        rejected: Whether each replicate rejected the null, or None when the
+            estimator performs no test.
         truth: The true value of the quantity being estimated.
 
     Raises:
@@ -41,8 +45,8 @@ class MonteCarloResult:
 
     estimates: npt.NDArray[np.float64]
     standard_errors: npt.NDArray[np.float64]
-    covered: npt.NDArray[np.bool_]
-    rejected: npt.NDArray[np.bool_]
+    covered: npt.NDArray[np.bool_] | None
+    rejected: npt.NDArray[np.bool_] | None
     truth: float
 
     def __post_init__(self) -> None:
@@ -54,8 +58,8 @@ class MonteCarloResult:
         lengths = {
             len(self.estimates),
             len(self.standard_errors),
-            len(self.covered),
-            len(self.rejected),
+            *([] if self.covered is None else [len(self.covered)]),
+            *([] if self.rejected is None else [len(self.rejected)]),
         }
         if len(lengths) > 1:
             raise ValueError(
@@ -119,7 +123,22 @@ class MonteCarloResult:
 
     @property
     def coverage(self) -> float:
-        """Fraction of replicates whose interval contained the truth."""
+        """Fraction of replicates whose interval contained the truth.
+
+        Returns:
+            float: The coverage rate.
+
+        Raises:
+            ValueError: If the study recorded no intervals. Reporting zero here
+                would be indistinguishable from an estimator whose intervals
+                never cover, which is the opposite conclusion.
+        """
+        if self.covered is None:
+            raise ValueError(
+                "this study recorded no confidence intervals, so it has no "
+                "coverage rate. Have the estimator report `lower` and `upper` "
+                "on every replicate."
+            )
         return float(np.mean(self.covered))
 
     @property
@@ -128,7 +147,18 @@ class MonteCarloResult:
 
         Under a true null this estimates the test's size; under an alternative,
         its power.
+
+        Returns:
+            float: The rejection rate.
+
+        Raises:
+            ValueError: If the study recorded no reject/accept decisions.
         """
+        if self.rejected is None:
+            raise ValueError(
+                "this study recorded no reject/accept decisions, so it has no "
+                "rejection rate."
+            )
         return float(np.mean(self.rejected))
 
     def summary(self, label: str = "") -> str:
@@ -140,8 +170,9 @@ class MonteCarloResult:
         Returns:
             str: One formatted line.
         """
+        cover = "  n/a" if self.covered is None else f"{self.coverage:5.3f}"
+        reject = "  n/a" if self.rejected is None else f"{self.rejection_rate:5.3f}"
         return (
             f"{label:34s} bias={self.bias:+9.5f} t={self.bias_t:+6.2f} "
-            f"SE/MC={self.se_ratio:5.3f} cover={self.coverage:.3f} "
-            f"reject={self.rejection_rate:.3f}"
+            f"SE/MC={self.se_ratio:5.3f} cover={cover} reject={reject}"
         )
