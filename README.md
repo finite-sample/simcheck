@@ -9,6 +9,8 @@ under the null, and does it have power under an alternative.
 
 ```bash
 pip install simcheck
+# until the first PyPI release lands:
+pip install "simcheck @ git+https://github.com/finite-sample/simcheck@v0.1.0"
 ```
 
 Python 3.11+. Depends on numpy, and nothing else.
@@ -86,12 +88,74 @@ rate.
 |---|---|
 | `assert_unbiased` | the mean estimate is more than 3 Monte Carlo standard errors from the truth |
 | `assert_coverage` | interval coverage falls outside the binomial band around the nominal level |
+| `assert_intervals_informative` | the intervals are so wide the study never saw one miss, so their coverage measures the width |
+| `assert_narrower` | one method's intervals are not measurably narrower than another's |
 | `assert_se_calibrated` | the reported standard error misstates the spread actually observed |
-| `assert_proportion` | an observed **rate** — size, power — is inconsistent with the claimed one |
+| `assert_power` | a test rejects less often than claimed under an alternative (one-sided) |
+| `assert_more_powerful` | one test does not reject measurably more often than another at the same alternative |
+| `assert_proportion` | an observed **rate** — size, coverage — is inconsistent with the claimed one |
 | `assert_count_rate` | the same, given a **count** of successes |
 
-`binomial_band(nominal, reps)` gives the band directly if you want to assert
-something else against it.
+`binomial_band(nominal, reps)`, `vacuous_width_ratio(nominal, reps)` and
+`se_ratio_tolerance(result)` give the three thresholds directly, if you want to
+assert something else against them. `width_ratio(result, nominal)` is the
+measured quantity behind the first of those.
+
+## Coverage cannot see a vacuous interval
+
+`assert_coverage` is satisfied by an interval so wide it always covers, whenever
+the study is small enough that a rate of 1.0 still sits inside the binomial band
+— and `assert coverage > 0.9`, written by hand, is satisfied by it always.
+Three repositories hit this independently and each left a comment where a test
+should have been; one had shipped an inflation heuristic that drove the reported
+standard error to 3×10⁷ times the estimation error while coverage stayed high,
+because a vacuous interval covers everything.
+
+The fix is to keep the endpoints, not just the hit:
+
+```python
+result = monte_carlo(replicate, truth=2.0, reps=2000, seed=11)
+assert_coverage(result, 0.95, "t interval")
+assert_intervals_informative(result, 0.95, "t interval")
+```
+
+Two things must both be true before that fails, and the conjunction is the
+point. The interval must be far wider than the width its own level requires
+against the spread the estimator actually has — `2 * z * sampling_sd`, measured
+by the study, so no absolute width is written down anywhere. *And* the study must
+never have seen it miss. A Student t interval at n=5 is 1.33 times the normal
+oracle width and an anytime-valid interval is wider still; both are correct, both
+miss at their nominal rate, and the study watches them do it. Width alone cannot
+tell conservatism from vacuity. Width plus a study that never saw a failure can.
+
+`vacuous_width_ratio(0.95, reps)` is the width multiple at which a study of that
+size stops being able to observe a miss: 1.78 at 100 replicates, 1.96 at 400,
+2.15 at 2000. It rises with the replicate count, which inverts the usual
+direction and is meant to — more replicates resolve rarer failures.
+
+The one thing here that is a judgement rather than a derivation is how many
+expected misses per study counts as "could not have failed". Its docstring says
+so, and says why no sampling distribution fixes it: correct procedures occupy the
+whole range of widths above the oracle.
+
+## Power
+
+The package claims to answer whether a test has power under an alternative, so
+there is a gate for it:
+
+```python
+assert_power(result, 0.80, "score test at delta=0.3")
+assert_more_powerful(robust, naive, "robust against naive at the same alternative")
+```
+
+`assert_power` is one-sided, unlike `assert_proportion`: power is a floor, and a
+two-sided band would fail a test for being *better* than promised. Size, which is
+a target rather than a floor, still belongs in `assert_proportion`.
+
+`assert_more_powerful` bands the gap between two rejection rates by the standard
+error of the difference. The assertion it replaces — `a.rejection_rate >
+b.rejection_rate` — passes on a gap of one replicate in four hundred and reports
+whichever method the seed favoured as the winner.
 
 ## Two failure modes this is built to prevent
 
@@ -118,6 +182,22 @@ reported as the best possible one. That is why counts and rates are separate
 functions here, and why `assert_proportion` raises rather than guesses when it
 is handed something outside `[0, 1]`.
 
+## The rule applies to simcheck too
+
+`assert_se_calibrated` used to take `tolerance=0.15`, which was the one number in
+the package chosen by hand rather than derived — and it was wrong in both
+directions at once. `se_ratio` is `mean(reported se) / sd(estimates)`, and both
+halves are estimated from the same replicates, so it is noisy even when the
+estimator is perfect: the numerator's relative standard error is `cv/sqrt(reps)`
+and the denominator's is `1/sqrt(2(reps-1))`. Added in quadrature and taken at
+three sigma, that is 0.21 at 100 replicates and 0.05 at 2000. A fixed 0.15 was
+therefore tight enough to fail correct estimators in a fast tier and loose enough
+to certify a 12% error in a deep one.
+
+The tolerance is now derived from `reps` by default; passing a number still
+overrides it, which is worth doing when the claim really is about a fixed
+accuracy at a fixed sample size. `se_ratio_tolerance(result)` returns the band.
+
 ## Negative tests
 
 Every gate has one: an input that violates the property, and a check that the
@@ -129,9 +209,11 @@ itself as tested.
 The gates are also run against estimators whose behaviour is known analytically
 (`tests/test_against_known_statistics.py`): the sample mean must trip nothing,
 the uncorrected `ddof=0` variance must be caught with its textbook bias of
-`-σ²/n`, and a 1.96 interval at n=5 must be caught under-covering at ≈0.875.
-There is also a false-positive check, because a gate that fires on 5% of correct
-code gets disabled within a week.
+`-σ²/n`, a 1.96 interval at n=5 must be caught under-covering at ≈0.875, a
+two-sided z test must show the power its formula gives (0.323 at n=25, 0.851 at
+n=100 for δ=0.3), and an interval built at a *known* scale must come out at a
+width ratio of exactly one. There is also a false-positive check, because a gate
+that fires on 5% of correct code gets disabled within a week.
 
 ## Tiers
 
