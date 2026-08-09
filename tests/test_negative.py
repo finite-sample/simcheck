@@ -21,6 +21,7 @@ rates are separate functions.
 
 from __future__ import annotations
 
+import math
 import subprocess
 import sys
 import textwrap
@@ -33,11 +34,22 @@ from simcheck import (
     MonteCarloResult,
     assert_count_rate,
     assert_coverage,
+    assert_intervals_informative,
+    assert_more_powerful,
+    assert_narrower,
+    assert_power,
     assert_proportion,
     assert_se_calibrated,
     assert_unbiased,
     binomial_band,
+    se_ratio_tolerance,
+    vacuous_width_ratio,
+    width_ratio,
 )
+
+# Two-sided normal quantile for 95%, from tables. simcheck has no scipy
+# dependency and should not gain one so a test can call `norm.ppf`.
+Z_95 = 1.959964
 
 
 def _study(
@@ -85,6 +97,85 @@ def _study(
     rejected = np.zeros(reps, dtype=bool)
     rejected[: round(rejection * reps)] = True
     return MonteCarloResult(estimates, errors, covered, rejected, truth)
+
+
+def _interval_study(
+    reps: int = 400,
+    sd: float = 0.1,
+    truth: float = 1.0,
+    bias: float = 0.0,
+    half_width: float | None = None,
+    width_cv: float = 0.0,
+    seed: int = 0,
+) -> MonteCarloResult:
+    """Build a study whose intervals have a known width and a known coverage.
+
+    Parameters
+    ----------
+    reps
+        Replicates.
+    sd
+        Spread of the estimates.
+    truth
+        True value.
+    bias
+        Constant added to every estimate.
+    half_width
+        Half-width of every interval. Defaults to the calibrated 95% one,
+        ``1.96 * sd``, which makes ``width_ratio`` exactly one.
+    width_cv
+        Relative spread of the width across replicates. Zero gives every
+        replicate the same width, as a procedure with a known scale would; a
+        real procedure estimates the scale and so has a width that varies.
+    seed
+        Generator seed.
+
+    Returns
+    -------
+    MonteCarloResult
+        The constructed study. ``covered`` is left for the result object to
+        derive from the endpoints, which is also what exercises that path.
+    """
+    rng = np.random.default_rng(seed)
+    estimates = rng.normal(truth + bias, sd, reps)
+    half = Z_95 * sd if half_width is None else half_width
+    if width_cv:
+        half = half * np.abs(1.0 + width_cv * rng.standard_normal(reps))
+    return MonteCarloResult(
+        estimates=estimates,
+        standard_errors=np.full(reps, sd),
+        covered=None,
+        rejected=None,
+        truth=truth,
+        lowers=estimates - half,
+        uppers=estimates + half,
+    )
+
+
+def _decision_study(rejection: float, reps: int = 400) -> MonteCarloResult:
+    """A study with an exact rejection rate and nothing else of interest.
+
+    Parameters
+    ----------
+    rejection
+        Exact fraction of replicates to mark rejected.
+    reps
+        Replicates.
+
+    Returns
+    -------
+    MonteCarloResult
+        The constructed study.
+    """
+    rejected = np.zeros(reps, dtype=bool)
+    rejected[: round(rejection * reps)] = True
+    return MonteCarloResult(
+        estimates=np.linspace(0.9, 1.1, reps),
+        standard_errors=np.full(reps, 0.05),
+        covered=None,
+        rejected=rejected,
+        truth=1.0,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -195,6 +286,533 @@ def test_assert_se_calibrated_refuses_a_degenerate_study():
         assert_se_calibrated(constant, "constant estimator")
 
 
+def test_the_se_tolerance_narrows_as_the_study_grows():
+    """The derived tolerance must be a function of the replicate count.
+
+    A constant 0.15 is simultaneously too loose to catch a 12% error in a deep
+    study and tight enough to fail a correct estimator in a shallow one. The
+    derived band is 0.21 at 100 replicates and 0.05 at 2000.
+    """
+    tolerances = [
+        se_ratio_tolerance(_study(reps=reps)) for reps in (100, 400, 2000, 20000)
+    ]
+    assert all(a > b for a, b in pairwise(tolerances)), tolerances
+    # Four times the replicates halves the band, since the spread of a sample
+    # standard deviation goes as 1/sqrt(2(reps-1)).
+    assert tolerances[0] / tolerances[2] == pytest.approx(4.47, rel=0.02)
+
+
+def test_the_same_se_error_passes_a_shallow_study_and_fails_a_deep_one():
+    """The point of deriving the tolerance, in one test.
+
+    A reported standard error 12% too large sits inside the hand-picked 0.15 at
+    every replicate count -- a 20000-replicate study could resolve it to better
+    than 1% and was told not to look. Derived, the same call passes at 100
+    replicates, where the study genuinely cannot tell, and fails at 2000.
+    """
+    assert_se_calibrated(_study(reps=100, se_scale=1.12), "too small to resolve 12%")
+    with pytest.raises(AssertionError, match="times the observed spread"):
+        assert_se_calibrated(_study(reps=2000, se_scale=1.12), "deep enough")
+    # And the hand-picked constant would have passed both.
+    assert_se_calibrated(_study(reps=2000, se_scale=1.12), "0.15", tolerance=0.15)
+
+
+def _heavy_tailed_study(reps: int, seed: int) -> MonteCarloResult:
+    """A perfectly calibrated estimator whose sampling error is Student t(5).
+
+    Scaled to unit variance, so a reported standard error of 1.0 is exactly
+    right and every gate should stay silent.
+
+    Parameters
+    ----------
+    reps
+        Replicates.
+    seed
+        Generator seed.
+
+    Returns
+    -------
+    MonteCarloResult
+        The constructed study.
+    """
+    rng = np.random.default_rng(seed)
+    estimates = rng.standard_t(5, reps) / np.sqrt(5 / 3)
+    return MonteCarloResult(
+        estimates=estimates,
+        standard_errors=np.ones(reps),
+        covered=None,
+        rejected=None,
+        truth=0.0,
+    )
+
+
+def test_the_se_tolerance_follows_the_fourth_moment():
+    """The noise in a sample standard deviation depends on the fourth moment.
+
+    ``Var(s)/sigma^2 = (kappa - 1) / (4n)``, which collapses to the familiar
+    ``1/(2n)`` only when ``kappa`` is 3. Assuming normality makes the band too
+    narrow for a heavy-tailed estimator and flags it for being correct.
+    """
+    reps = 400
+    heavy = _heavy_tailed_study(reps, 3)
+    estimates = heavy.estimates
+    kurtosis = float(
+        np.mean(((estimates - estimates.mean()) / estimates.std(ddof=1)) ** 4)
+    )
+    assert kurtosis > 3.0
+
+    # The reported standard errors are constant here, so the numerator of the
+    # ratio contributes no noise and the whole band is the spread of the
+    # sampling standard deviation.
+    assert se_ratio_tolerance(heavy) == pytest.approx(
+        3.0 * math.sqrt((kurtosis - 1.0) / (4 * reps)), rel=1e-12
+    )
+    assert se_ratio_tolerance(heavy) > 3.0 / math.sqrt(2 * reps)
+
+
+def test_the_se_tolerance_never_narrows_below_the_normal_case():
+    """A low sample kurtosis must not tighten the band.
+
+    The sample kurtosis is an eighth-moment quantity and is badly
+    downward-biased at Monte Carlo replicate counts, so letting a low estimate
+    narrow the band would reintroduce the very failure the fourth-moment term
+    exists to prevent.
+    """
+    reps = 200
+    # A two-point distribution has kurtosis 1, the smallest there is.
+    two_point = np.tile([-1.0, 1.0], reps // 2)
+    study = MonteCarloResult(
+        estimates=two_point,
+        standard_errors=np.ones(reps),
+        covered=None,
+        rejected=None,
+        truth=0.0,
+    )
+    assert se_ratio_tolerance(study) == pytest.approx(
+        3.0 / math.sqrt(2 * reps), rel=1e-12
+    )
+
+
+def test_a_calibrated_heavy_tailed_estimator_is_not_flagged():
+    """A gate that fires on 5% of correct code gets disabled within a week.
+
+    Student t(5) sampling error is calibrated here by construction: the reported
+    standard error is exactly the true one. With the band computed as though the
+    estimates were normal, 19 of these 200 studies were flagged. The bound below
+    is the package's own stated standard for a false-positive rate, not the
+    number that happened to come out.
+    """
+    flagged = 0
+    for seed in range(200):
+        try:
+            assert_se_calibrated(_heavy_tailed_study(400, seed), f"seed {seed}")
+        except AssertionError:
+            flagged += 1
+    assert flagged <= 10, f"{flagged} of 200 calibrated t(5) studies were flagged"
+
+    # And the specific study that exposed this must pass.
+    assert_se_calibrated(_heavy_tailed_study(400, 0), "the reported counterexample")
+
+
+def test_the_se_tolerance_refuses_a_study_with_no_standard_errors():
+    """A NaN tolerance is worse than no tolerance at all.
+
+    The helper is public, so a caller may write the obvious check by hand --
+    ``if abs(ratio - 1) > tolerance: raise`` -- and every comparison against NaN
+    is False, so that check passes silently on a study that measured nothing.
+    """
+    study = MonteCarloResult(
+        estimates=np.linspace(0.9, 1.1, 100),
+        standard_errors=np.full(100, np.nan),
+        covered=None,
+        rejected=None,
+        truth=1.0,
+    )
+    with pytest.raises(ValueError, match="no ratio to put a band around"):
+        se_ratio_tolerance(study)
+
+
+def test_assert_se_calibrated_says_so_when_no_standard_error_was_reported():
+    """A NaN standard error is an absent measurement, not a zero spread.
+
+    ``Estimate`` documents that leaving ``standard_error`` as NaN means the gate
+    "will have nothing to check and will say so". It used to say the estimator
+    did not vary, which is a different -- and false -- diagnosis.
+    """
+    study = MonteCarloResult(
+        estimates=np.linspace(0.9, 1.1, 100),
+        standard_errors=np.full(100, np.nan),
+        covered=None,
+        rejected=None,
+        truth=1.0,
+    )
+    with pytest.raises(AssertionError, match="reported no usable standard error"):
+        assert_se_calibrated(study, "no standard error")
+
+
+# --------------------------------------------------------------------------
+# Vacuity: an interval so wide it cannot fail.
+# --------------------------------------------------------------------------
+
+
+def test_assert_intervals_informative_passes_a_calibrated_interval():
+    """A 1.96-sigma interval is exactly as wide as its level requires."""
+    study = _interval_study()
+    assert width_ratio(study) == pytest.approx(1.0, rel=0.05)
+    assert_intervals_informative(study, 0.95, "calibrated")
+
+
+def test_assert_intervals_informative_fails_an_interval_that_cannot_miss():
+    """The defect `assert_coverage` cannot see: coverage of 1.0 by construction."""
+    study = _interval_study(half_width=10 * 0.1)
+    with pytest.raises(AssertionError, match="intervals are vacuous"):
+        assert_intervals_informative(study, 0.95, "ten-sigma interval")
+
+
+def test_a_conservative_but_honest_interval_is_not_called_vacuous():
+    """The false-positive guard, and the reason the gate has two conditions.
+
+    A Student t interval at n=5 is 1.33 times the width the normal oracle needs,
+    which is above the naive width threshold at any replicate count -- and it is
+    correct. It misses at its nominal rate, the study sees those misses, so it is
+    conservative rather than vacuous. A gate that fired here would be switched
+    off within a week.
+    """
+    reps, n = 2000, 5
+    rng = np.random.default_rng(4)
+    draws = rng.normal(1.0, 1.0, size=(reps, n))
+    means = draws.mean(axis=1)
+    errors = draws.std(axis=1, ddof=1) / np.sqrt(n)
+    half = 2.776445 * errors  # t_{0.975, 4}, from tables.
+    study = MonteCarloResult(
+        estimates=means,
+        standard_errors=errors,
+        covered=None,
+        rejected=None,
+        truth=1.0,
+        lowers=means - half,
+        uppers=means + half,
+    )
+    assert width_ratio(study) == pytest.approx(1.33, rel=0.1)
+    assert width_ratio(study) > vacuous_width_ratio(0.95, reps) / 2
+    assert_coverage(study, 0.95, "t interval at n=5")
+    assert_intervals_informative(study, 0.95, "t interval at n=5")
+
+
+def test_width_alone_does_not_make_an_interval_vacuous():
+    """A wide interval the study watched fail is a different defect.
+
+    Here the estimator is biased by five standard deviations and its intervals
+    are three times as wide as they need to be, so it misses about a fifth of the
+    time. That is a bias, which `assert_unbiased` reports; calling it vacuity as
+    well would send the reader after the wrong thing.
+    """
+    study = _interval_study(bias=0.5, half_width=3 * Z_95 * 0.1)
+    assert width_ratio(study) == pytest.approx(3.0, rel=0.05)
+    assert_intervals_informative(study, 0.95, "wide, biased, and caught")
+    with pytest.raises(AssertionError, match="standard errors from zero"):
+        assert_unbiased(study, "wide, biased, and caught")
+
+
+@pytest.mark.parametrize(
+    ("case", "half_width", "reps"),
+    [
+        # geoinference: "an interval so wide it covers every single time, which
+        # is a defect the assertion cannot see".
+        ("geoinference: coverage 1.0 at 300 replicates", 8 * 0.1, 300),
+        # alsgls: "an interval covering 100% of the time, which means it is far
+        # too wide, passed it".
+        ("alsgls: pooled points, coverage 1.0", 6 * 0.1, 300),
+        # incline: "an inflation heuristic drove this ratio to 3e7 while
+        # coverage stayed high, because a vacuous interval covers everything".
+        ("incline: reported se 3e7 times the error", 3e7 * Z_95 * 0.1, 400),
+    ],
+)
+def test_the_three_workarounds_in_the_wild_are_caught(case, half_width, reps):
+    """Each sibling repo hand-rolled a comment where this gate should have been.
+
+    Three repositories independently hit the same hole in `assert_coverage` and
+    wrote a comment about it instead of a test. If the gate cannot reproduce all
+    three failures it is the wrong gate, so all three run here.
+    """
+    study = _interval_study(reps=reps, half_width=half_width)
+    assert study.coverage == 1.0, case
+    with pytest.raises(AssertionError, match="intervals are vacuous"):
+        assert_intervals_informative(study, 0.95, case)
+
+
+def test_the_vacuity_gate_needs_endpoints():
+    """Coverage alone cannot answer the question, and saying so beats guessing."""
+    with pytest.raises(ValueError, match="recorded no interval endpoints"):
+        assert_intervals_informative(_study(), 0.95, "no endpoints")
+
+
+def test_the_vacuity_threshold_comes_from_the_replicate_count():
+    """More replicates resolve rarer misses, so the width limit rises with reps."""
+    ratios = [vacuous_width_ratio(0.95, reps) for reps in (100, 400, 2000, 10000)]
+    assert all(a < b for a, b in pairwise(ratios)), ratios
+    # And it is the width whose implied miss rate leaves `alpha` misses expected
+    # in the whole study: reps * 2 * (1 - Phi(r * z)) == alpha.
+    reps = 400
+    implied = math.erfc(ratios[1] * Z_95 / math.sqrt(2.0))
+    assert reps * implied == pytest.approx(0.05, rel=1e-6)
+
+
+# --------------------------------------------------------------------------
+# Widths across two methods.
+# --------------------------------------------------------------------------
+
+
+def test_assert_narrower_passes_when_one_method_really_is_narrower():
+    """The efficiency comparison, when the gap is real."""
+    tight = _interval_study(half_width=Z_95 * 0.1, width_cv=0.2, seed=1)
+    loose = _interval_study(half_width=1.5 * Z_95 * 0.1, width_cv=0.2, seed=2)
+    assert_narrower(tight, loose, "tight against loose")
+
+
+def test_assert_narrower_fails_when_the_gap_is_noise():
+    """Two methods of the same width must not be ranked by the seed.
+
+    ``a.mean_width < b.mean_width`` is true of one of the two whatever they are,
+    which is exactly the assertion this replaces.
+    """
+    first = _interval_study(half_width=Z_95 * 0.1, width_cv=0.2, seed=1)
+    second = _interval_study(half_width=Z_95 * 0.1001, width_cv=0.2, seed=1)
+    assert first.mean_width < second.mean_width
+    with pytest.raises(AssertionError, match="not measurably below"):
+        assert_narrower(first, second, "a hair narrower")
+
+
+def test_a_width_that_never_varies_needs_only_to_be_smaller():
+    """With a known scale the width is not random, so any gap is a real gap.
+
+    Both studies here produce exactly one width, so the Monte Carlo standard
+    error of the difference is exactly zero and the gate reduces to a strict
+    inequality. Demanding a multiple of a zero standard error would make the gate
+    unsatisfiable for the one case where the answer is certain.
+    """
+
+    def fixed(width: float) -> MonteCarloResult:
+        reps = 200
+        return MonteCarloResult(
+            estimates=np.linspace(0.4, 0.6, reps),
+            standard_errors=np.full(reps, 0.05),
+            covered=None,
+            rejected=None,
+            truth=0.5,
+            lowers=np.zeros(reps),
+            uppers=np.full(reps, width),
+        )
+
+    assert_narrower(fixed(0.19), fixed(0.20), "known scale")
+    with pytest.raises(AssertionError, match="exactly zero Monte Carlo"):
+        assert_narrower(fixed(0.20), fixed(0.19), "known scale, backwards")
+
+
+def test_assert_narrower_fails_when_the_arguments_are_the_wrong_way_round():
+    """A wired-up-backwards comparison must not pass."""
+    tight = _interval_study(half_width=Z_95 * 0.1, seed=1)
+    loose = _interval_study(half_width=2 * Z_95 * 0.1, seed=2)
+    with pytest.raises(AssertionError, match="not measurably below"):
+        assert_narrower(loose, tight, "backwards")
+
+
+def test_assert_narrower_refuses_a_one_replicate_comparison():
+    """One draw has no spread, so a gap measured on it is not a gap.
+
+    The Monte Carlo standard error of the difference is zero when either study
+    has a single replicate, and a zero standard error reads as certainty -- so
+    the gate would certify whichever method the one draw happened to favour.
+    """
+    single = _interval_study(reps=1, half_width=0.1)
+    pair = _interval_study(reps=2, half_width=0.2)
+    with pytest.raises(ValueError, match="which has no spread"):
+        assert_narrower(single, pair, "one replicate")
+    with pytest.raises(ValueError, match="which has no spread"):
+        assert_narrower(pair, single, "one replicate on the other side")
+
+
+def test_assert_narrower_needs_endpoints_on_both_studies():
+    """Comparing a width against an unmeasured one is not a comparison."""
+    with pytest.raises(ValueError, match="`wide` study recorded no interval"):
+        assert_narrower(_interval_study(), _study(), "one side missing")
+
+
+# --------------------------------------------------------------------------
+# Power.
+# --------------------------------------------------------------------------
+
+
+def test_assert_power_passes_a_test_that_meets_its_claim():
+    """A test rejecting 80% of the time meets a claim of 0.75."""
+    assert_power(_decision_study(0.80), 0.75, "adequately powered")
+
+
+def test_assert_power_fails_an_underpowered_test():
+    """Half the claimed power over 400 replicates cannot be missed."""
+    with pytest.raises(AssertionError, match="below the one-sided"):
+        assert_power(_decision_study(0.40), 0.80, "underpowered")
+
+
+def test_assert_power_is_one_sided():
+    """Rejecting more often than promised is not a defect of the test.
+
+    ``assert_proportion`` bands both sides, which is right for size and wrong for
+    power: it would fail a test for being better than claimed.
+    """
+    strong = _decision_study(0.95)
+    assert_power(strong, 0.50, "better than claimed")
+    with pytest.raises(AssertionError, match="outside the 3-sigma band"):
+        assert_proportion(strong.rejection_rate, strong.reps, 0.50, "two-sided")
+
+
+def test_assert_power_tightens_with_replicates():
+    """The floor is a binomial band, so it closes on the claim as reps grow."""
+    assert_power(_decision_study(0.74, reps=100), 0.80, "cannot resolve 6 points")
+    with pytest.raises(AssertionError):
+        assert_power(_decision_study(0.74, reps=4000), 0.80, "can resolve 6 points")
+
+
+def test_assert_power_needs_decisions():
+    """A study that recorded no rejections has no power, rather than zero power."""
+    with pytest.raises(ValueError, match="recorded no reject/accept decisions"):
+        assert_power(_interval_study(), 0.8, "no decisions")
+
+
+def test_assert_power_rejects_an_impossible_claim():
+    """A power outside [0, 1] is a caller error."""
+    with pytest.raises(ValueError, match="must be a probability"):
+        assert_power(_decision_study(0.5), 1.4)
+
+
+def test_assert_more_powerful_passes_on_a_real_gap():
+    """Half again the rejection rate over 400 replicates is not noise."""
+    assert_more_powerful(_decision_study(0.80), _decision_study(0.50), "real gap")
+
+
+def test_assert_more_powerful_fails_on_a_gap_that_is_noise():
+    """Two points of rejection rate at 400 replicates is a coin flip.
+
+    This is the assertion the gate replaces: ``strong > weak`` is satisfied by
+    whichever method the seed favoured, and reports it as a finding.
+    """
+    strong, weak = _decision_study(0.52), _decision_study(0.50)
+    assert strong.rejection_rate > weak.rejection_rate
+    with pytest.raises(AssertionError, match="not measurably above"):
+        assert_more_powerful(strong, weak, "two points of rate")
+
+
+def test_assert_more_powerful_fails_when_the_arguments_are_the_wrong_way_round():
+    """A comparison wired up backwards must not pass."""
+    with pytest.raises(AssertionError, match="not measurably above"):
+        assert_more_powerful(_decision_study(0.30), _decision_study(0.80), "backwards")
+
+
+def test_a_rejection_rate_of_one_is_not_known_with_certainty():
+    """The plug-in Wald standard error is exactly zero at a rate of 0 or 1.
+
+    One replicate rejecting against one not rejecting is a gap of 1.0 with a
+    plug-in standard error of 0, which passes any multiple of it -- a three-sigma
+    claim from two observations. The Agresti-Caffo standard error gives that case
+    2.6 sigma, so it fails.
+    """
+    with pytest.raises(AssertionError, match="not measurably above"):
+        assert_more_powerful(
+            _decision_study(1.0, reps=1), _decision_study(0.0, reps=1), "one each"
+        )
+
+
+def test_one_replicate_cannot_beat_a_hundred():
+    """Adjusting the variance but not the gap leaves the same hole open.
+
+    One replicate rejecting against a hundred not rejecting is a *raw* gap of
+    1.0, which clears three sigma against an Agresti-Caffo standard error. The
+    adjustment has to be applied to the gap as well, which puts this case at 2.4
+    sigma.
+    """
+    with pytest.raises(AssertionError, match="not measurably above"):
+        assert_more_powerful(
+            _decision_study(1.0, reps=1), _decision_study(0.0, reps=100), "1 v 100"
+        )
+
+
+def test_total_separation_over_a_real_study_still_passes():
+    """The guard on the guard: the boundary fix must not blind the gate.
+
+    All four hundred replicates rejecting against none of them is the largest
+    difference there is, and a correction that failed here would have traded one
+    defect for another.
+    """
+    assert_more_powerful(
+        _decision_study(1.0, reps=400), _decision_study(0.0, reps=400), "separated"
+    )
+
+
+def test_assert_more_powerful_needs_decisions_on_both_studies():
+    """One side without decisions is not a comparison."""
+    with pytest.raises(ValueError, match="`less` study recorded no reject"):
+        assert_more_powerful(_decision_study(0.8), _interval_study(), "one side")
+
+
+# --------------------------------------------------------------------------
+# Interval endpoints on the result object.
+# --------------------------------------------------------------------------
+
+
+def test_one_endpoint_without_the_other_is_rejected():
+    """Half an interval is not an interval."""
+    with pytest.raises(ValueError, match="needs both endpoints"):
+        MonteCarloResult(
+            estimates=np.zeros(10),
+            standard_errors=np.ones(10),
+            covered=None,
+            rejected=None,
+            truth=0.0,
+            lowers=np.full(10, -1.0),
+        )
+
+
+def test_a_backwards_interval_is_rejected():
+    """A negative width is not a width."""
+    with pytest.raises(ValueError, match="upper endpoint below the lower"):
+        MonteCarloResult(
+            estimates=np.zeros(10),
+            standard_errors=np.ones(10),
+            covered=None,
+            rejected=None,
+            truth=0.0,
+            lowers=np.full(10, 1.0),
+            uppers=np.full(10, -1.0),
+        )
+
+
+def test_covered_contradicting_the_endpoints_is_rejected():
+    """Two measurements of the same thing that disagree are one measurement too many."""
+    with pytest.raises(ValueError, match="disagrees with the endpoints"):
+        MonteCarloResult(
+            estimates=np.zeros(10),
+            standard_errors=np.ones(10),
+            covered=np.zeros(10, dtype=bool),
+            rejected=None,
+            truth=0.0,
+            lowers=np.full(10, -1.0),
+            uppers=np.full(10, 1.0),
+        )
+
+
+def test_covered_is_filled_in_from_the_endpoints():
+    """Endpoints determine coverage exactly, so a study with them has a rate."""
+    study = _interval_study(reps=100, half_width=Z_95 * 0.1)
+    assert study.covered is not None
+    assert 0.85 <= study.coverage <= 1.0
+
+
+def test_a_study_without_endpoints_has_no_widths():
+    """Zero would read as an infinitely precise estimator, not an unmeasured one."""
+    with pytest.raises(ValueError, match="recorded no interval endpoints"):
+        _ = _study().mean_width
+
+
 # --------------------------------------------------------------------------
 # The band itself.
 # --------------------------------------------------------------------------
@@ -278,7 +896,9 @@ def test_the_gates_still_fire_under_python_o():
         import sys
         from simcheck import (
             MonteCarloResult, assert_count_rate, assert_coverage,
-            assert_proportion, assert_se_calibrated, assert_unbiased,
+            assert_intervals_informative, assert_more_powerful, assert_narrower,
+            assert_power, assert_proportion, assert_se_calibrated,
+            assert_unbiased,
         )
         import numpy as np
 
@@ -307,6 +927,28 @@ def test_the_gates_still_fire_under_python_o():
         check("coverage", lambda: assert_coverage(biased, 0.95))
         check("se_calibrated", lambda: assert_se_calibrated(biased))
 
+        estimates = np.linspace(0.9, 1.1, 400)
+        def interval(half, rejection):
+            flags = np.zeros(400, dtype=bool)
+            flags[: round(rejection * 400)] = True
+            return MonteCarloResult(
+                estimates=estimates,
+                standard_errors=np.full(400, 0.058),
+                covered=None,
+                rejected=flags,
+                truth=1.0,
+                lowers=estimates - half,
+                uppers=estimates + half,
+            )
+
+        vacuous = interval(1.0, 0.5)
+        check("intervals_informative",
+              lambda: assert_intervals_informative(vacuous, 0.95))
+        check("narrower", lambda: assert_narrower(vacuous, interval(0.2, 0.5)))
+        check("power", lambda: assert_power(interval(1.0, 0.30), 0.80))
+        check("more_powerful",
+              lambda: assert_more_powerful(interval(1.0, 0.50), interval(1.0, 0.49)))
+
         print(",".join(sorted(fired)))
     """)
     result = subprocess.run(  # noqa: S603
@@ -319,6 +961,10 @@ def test_the_gates_still_fire_under_python_o():
     assert fired == {
         "count_rate",
         "coverage",
+        "intervals_informative",
+        "more_powerful",
+        "narrower",
+        "power",
         "proportion",
         "se_calibrated",
         "unbiased",

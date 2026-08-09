@@ -15,6 +15,7 @@ import pytest
 from simcheck import (
     Estimate,
     assert_coverage,
+    assert_intervals_informative,
     assert_unbiased,
     monte_carlo,
 )
@@ -92,6 +93,38 @@ def test_a_study_without_intervals_has_no_coverage_rather_than_zero_coverage():
 
     # The rest of the study is still usable.
     assert_unbiased(result, "sample mean without intervals")
+
+
+def test_the_runner_keeps_the_endpoints_and_not_only_the_hit():
+    """Reducing each interval to a boolean throws away the width.
+
+    Coverage cannot distinguish a calibrated interval from one so wide it could
+    not have failed, and the endpoints are the only evidence that would. They
+    used to be computed, used once and dropped on the floor.
+    """
+    result = monte_carlo(_mean_with_interval, TRUTH, 200, seed=5)
+
+    assert result.lowers is not None
+    assert result.uppers is not None
+    np.testing.assert_array_equal(
+        result.covered, (result.lowers <= TRUTH) & (result.uppers >= TRUTH)
+    )
+    # Every interval is 1.96 standard errors either side, so the mean width is
+    # 2 * 1.96 * the mean reported standard error, exactly.
+    assert result.mean_width == pytest.approx(
+        2 * 1.96 * float(np.mean(result.standard_errors)), rel=1e-12
+    )
+    assert_intervals_informative(result, 0.95, "1.96 interval at n=40")
+
+
+def test_a_study_without_intervals_has_no_widths():
+    """Zero width would read as an infinitely precise estimator."""
+    result = monte_carlo(_mean_without_interval, TRUTH, 50, seed=0)
+    assert result.lowers is None
+    with pytest.raises(ValueError, match="recorded no interval endpoints"):
+        _ = result.mean_width
+    with pytest.raises(ValueError, match="recorded no interval endpoints"):
+        assert_intervals_informative(result, 0.95, "no intervals")
 
 
 def test_a_study_without_decisions_has_no_rejection_rate():

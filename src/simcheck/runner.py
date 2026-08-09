@@ -81,7 +81,10 @@ def monte_carlo(
             ``reps`` adds replicates rather than changing the existing ones.
 
     Returns:
-        MonteCarloResult: The recorded sampling behaviour.
+        MonteCarloResult: The recorded sampling behaviour. The interval
+        endpoints are kept, not only whether each interval covered, because
+        coverage on its own cannot tell a calibrated interval from one so wide
+        it could not have failed.
 
     Raises:
         ValueError: If ``reps`` is not positive, or if the estimator reported an
@@ -127,8 +130,10 @@ def monte_carlo(
             flags[i] = bool(outcome.rejected)
 
     covered = None
+    endpoints: tuple[np.ndarray, np.ndarray] | tuple[None, None] = (None, None)
     if with_interval.all():
         covered = (lowers <= truth) & (truth <= uppers)
+        endpoints = (lowers, uppers)
     elif with_interval.any():
         raise ValueError(
             f"{int(with_interval.sum())} of {reps} replicates reported an "
@@ -147,4 +152,6 @@ def monte_carlo(
             "a mixture is not a size or a power."
         )
 
-    return MonteCarloResult(values, errors, covered, rejected, truth)
+    return MonteCarloResult(
+        values, errors, covered, rejected, truth, endpoints[0], endpoints[1]
+    )

@@ -26,6 +26,12 @@ input that violates the property, and a check that the gate raises on it. A
 helper that silently passes everything is worse than no helper, because it
 converts an untested codebase into one that reports itself as tested.
 
+**A gate that a vacuous answer satisfies.** Coverage is satisfied by an interval
+so wide it always covers, which is why the endpoints are kept and
+:func:`~simcheck.assert_intervals_informative` exists; and one-sided power was
+being asserted by hand as ``a > b``, which is satisfied by a gap of one
+replicate, which is why :func:`~simcheck.assert_more_powerful` exists.
+
 Examples:
 >>> import numpy as np
 >>> from simcheck import MonteCarloResult, assert_coverage, assert_unbiased
@@ -51,10 +57,17 @@ from .gates import (
     GATE_SIGMAS,
     assert_count_rate,
     assert_coverage,
+    assert_intervals_informative,
+    assert_more_powerful,
+    assert_narrower,
+    assert_power,
     assert_proportion,
     assert_se_calibrated,
     assert_unbiased,
     binomial_band,
+    se_ratio_tolerance,
+    vacuous_width_ratio,
+    width_ratio,
 )
 from .results import MonteCarloResult
 from .runner import Estimate, monte_carlo
@@ -74,6 +87,10 @@ __all__ = [
     "__version__",
     "assert_count_rate",
     "assert_coverage",
+    "assert_intervals_informative",
+    "assert_more_powerful",
+    "assert_narrower",
+    "assert_power",
     "assert_proportion",
     "assert_se_calibrated",
     "assert_unbiased",
@@ -81,4 +98,7 @@ __all__ = [
     "deep_tier",
     "monte_carlo",
     "reps_for",
+    "se_ratio_tolerance",
+    "vacuous_width_ratio",
+    "width_ratio",
 ]
