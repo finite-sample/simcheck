@@ -317,6 +317,103 @@ def test_the_same_se_error_passes_a_shallow_study_and_fails_a_deep_one():
     assert_se_calibrated(_study(reps=2000, se_scale=1.12), "0.15", tolerance=0.15)
 
 
+def _heavy_tailed_study(reps: int, seed: int) -> MonteCarloResult:
+    """A perfectly calibrated estimator whose sampling error is Student t(5).
+
+    Scaled to unit variance, so a reported standard error of 1.0 is exactly
+    right and every gate should stay silent.
+
+    Parameters
+    ----------
+    reps
+        Replicates.
+    seed
+        Generator seed.
+
+    Returns
+    -------
+    MonteCarloResult
+        The constructed study.
+    """
+    rng = np.random.default_rng(seed)
+    estimates = rng.standard_t(5, reps) / np.sqrt(5 / 3)
+    return MonteCarloResult(
+        estimates=estimates,
+        standard_errors=np.ones(reps),
+        covered=None,
+        rejected=None,
+        truth=0.0,
+    )
+
+
+def test_the_se_tolerance_follows_the_fourth_moment():
+    """The noise in a sample standard deviation depends on the fourth moment.
+
+    ``Var(s)/sigma^2 = (kappa - 1) / (4n)``, which collapses to the familiar
+    ``1/(2n)`` only when ``kappa`` is 3. Assuming normality makes the band too
+    narrow for a heavy-tailed estimator and flags it for being correct.
+    """
+    reps = 400
+    heavy = _heavy_tailed_study(reps, 3)
+    estimates = heavy.estimates
+    kurtosis = float(
+        np.mean(((estimates - estimates.mean()) / estimates.std(ddof=1)) ** 4)
+    )
+    assert kurtosis > 3.0
+
+    # The reported standard errors are constant here, so the numerator of the
+    # ratio contributes no noise and the whole band is the spread of the
+    # sampling standard deviation.
+    assert se_ratio_tolerance(heavy) == pytest.approx(
+        3.0 * math.sqrt((kurtosis - 1.0) / (4 * reps)), rel=1e-12
+    )
+    assert se_ratio_tolerance(heavy) > 3.0 / math.sqrt(2 * reps)
+
+
+def test_the_se_tolerance_never_narrows_below_the_normal_case():
+    """A low sample kurtosis must not tighten the band.
+
+    The sample kurtosis is an eighth-moment quantity and is badly
+    downward-biased at Monte Carlo replicate counts, so letting a low estimate
+    narrow the band would reintroduce the very failure the fourth-moment term
+    exists to prevent.
+    """
+    reps = 200
+    # A two-point distribution has kurtosis 1, the smallest there is.
+    two_point = np.tile([-1.0, 1.0], reps // 2)
+    study = MonteCarloResult(
+        estimates=two_point,
+        standard_errors=np.ones(reps),
+        covered=None,
+        rejected=None,
+        truth=0.0,
+    )
+    assert se_ratio_tolerance(study) == pytest.approx(
+        3.0 / math.sqrt(2 * reps), rel=1e-12
+    )
+
+
+def test_a_calibrated_heavy_tailed_estimator_is_not_flagged():
+    """A gate that fires on 5% of correct code gets disabled within a week.
+
+    Student t(5) sampling error is calibrated here by construction: the reported
+    standard error is exactly the true one. With the band computed as though the
+    estimates were normal, 19 of these 200 studies were flagged. The bound below
+    is the package's own stated standard for a false-positive rate, not the
+    number that happened to come out.
+    """
+    flagged = 0
+    for seed in range(200):
+        try:
+            assert_se_calibrated(_heavy_tailed_study(400, seed), f"seed {seed}")
+        except AssertionError:
+            flagged += 1
+    assert flagged <= 10, f"{flagged} of 200 calibrated t(5) studies were flagged"
+
+    # And the specific study that exposed this must pass.
+    assert_se_calibrated(_heavy_tailed_study(400, 0), "the reported counterexample")
+
+
 def test_assert_se_calibrated_says_so_when_no_standard_error_was_reported():
     """A NaN standard error is an absent measurement, not a zero spread.
 
@@ -502,6 +599,21 @@ def test_assert_narrower_fails_when_the_arguments_are_the_wrong_way_round():
         assert_narrower(loose, tight, "backwards")
 
 
+def test_assert_narrower_refuses_a_one_replicate_comparison():
+    """One draw has no spread, so a gap measured on it is not a gap.
+
+    The Monte Carlo standard error of the difference is zero when either study
+    has a single replicate, and a zero standard error reads as certainty -- so
+    the gate would certify whichever method the one draw happened to favour.
+    """
+    single = _interval_study(reps=1, half_width=0.1)
+    pair = _interval_study(reps=2, half_width=0.2)
+    with pytest.raises(ValueError, match="which has no spread"):
+        assert_narrower(single, pair, "one replicate")
+    with pytest.raises(ValueError, match="which has no spread"):
+        assert_narrower(pair, single, "one replicate on the other side")
+
+
 def test_assert_narrower_needs_endpoints_on_both_studies():
     """Comparing a width against an unmeasured one is not a comparison."""
     with pytest.raises(ValueError, match="`wide` study recorded no interval"):
@@ -576,6 +688,32 @@ def test_assert_more_powerful_fails_when_the_arguments_are_the_wrong_way_round()
     """A comparison wired up backwards must not pass."""
     with pytest.raises(AssertionError, match="not measurably above"):
         assert_more_powerful(_decision_study(0.30), _decision_study(0.80), "backwards")
+
+
+def test_a_rejection_rate_of_one_is_not_known_with_certainty():
+    """The plug-in Wald standard error is exactly zero at a rate of 0 or 1.
+
+    One replicate rejecting against one not rejecting is a gap of 1.0 with a
+    plug-in standard error of 0, which passes any multiple of it -- a three-sigma
+    claim from two observations. The Agresti-Caffo standard error gives that case
+    2.6 sigma, so it fails.
+    """
+    with pytest.raises(AssertionError, match="not measurably above"):
+        assert_more_powerful(
+            _decision_study(1.0, reps=1), _decision_study(0.0, reps=1), "one each"
+        )
+
+
+def test_total_separation_over_a_real_study_still_passes():
+    """The guard on the guard: the boundary fix must not blind the gate.
+
+    All four hundred replicates rejecting against none of them is the largest
+    difference there is, and a correction that failed here would have traded one
+    defect for another.
+    """
+    assert_more_powerful(
+        _decision_study(1.0, reps=400), _decision_study(0.0, reps=400), "separated"
+    )
 
 
 def test_assert_more_powerful_needs_decisions_on_both_studies():

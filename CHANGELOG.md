@@ -86,8 +86,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was `0.15`, the one number in the package chosen by hand rather than derived,
   and it was wrong in both directions: `se_ratio` divides a mean of `reps`
   reported standard errors by a sample standard deviation of `reps` estimates, so
-  its Monte Carlo spread is `sqrt(cv^2/reps + 1/(2(reps-1)))`, and three of those
-  is 0.21 at 100 replicates and 0.05 at 2000. The fixed value was therefore tight
+  its Monte Carlo spread is `sqrt(cv^2/reps + (kappa-1)/(4*reps))`, and three of
+  those is 0.21 at 100 replicates and 0.05 at 2000 for a normal estimator. The fixed value was therefore tight
   enough to fail correct estimators in a fast tier and loose enough to certify a
   12% error in a deep one. Passing `tolerance=` explicitly still overrides it,
   and `se_ratio_tolerance(result)` returns the derived band.
@@ -96,6 +96,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   consuming repositories only `geoinference` does, and its suite was re-run
   against this branch: 43 passed, 4 subtests passed. Every other consumer passes
   `tolerance=` explicitly or does not call the gate.
+
+  The band uses the estimator's own fourth moment, not a normal assumption:
+  `Var(s)/sigma^2 = (kappa-1)/(4*reps)`, with `kappa` estimated from the study and
+  floored at 3 so a downward-biased sample kurtosis cannot narrow it. Assuming
+  normality flagged a *calibrated* estimator with Student t(5) sampling error in
+  19 of 200 studies; with the fourth-moment term it is 2 of 200.
 
 ### Fixed
 

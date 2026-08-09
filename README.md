@@ -189,8 +189,10 @@ the package chosen by hand rather than derived — and it was wrong in both
 directions at once. `se_ratio` is `mean(reported se) / sd(estimates)`, and both
 halves are estimated from the same replicates, so it is noisy even when the
 estimator is perfect: the numerator's relative standard error is `cv/sqrt(reps)`
-and the denominator's is `1/sqrt(2(reps-1))`. Added in quadrature and taken at
-three sigma, that is 0.21 at 100 replicates and 0.05 at 2000. A fixed 0.15 was
+and the denominator's is `sqrt((κ-1)/(4·reps))`, where κ is the estimator's
+kurtosis — measured, not assumed, because a normal assumption flags a correct
+heavy-tailed estimator. Added in quadrature and taken at three sigma, that is
+0.21 at 100 replicates and 0.05 at 2000 for a normal estimator. A fixed 0.15 was
 therefore tight enough to fail correct estimators in a fast tier and loose enough
 to certify a 12% error in a deep one.
 

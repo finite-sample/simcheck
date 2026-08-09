@@ -273,19 +273,92 @@ def _mean_gap_se(first: np.ndarray, second: np.ndarray) -> float:
     this is the conservative choice: a paired comparison passing this gate would
     also pass a paired one.
 
+    A study of one replicate has no estimable variance, and reporting zero for it
+    would say the difference is known exactly -- so one replicate would certify
+    whichever method the single draw happened to favour. Callers check the
+    replicate count before getting here.
+
     Args:
-        first: Per-replicate values from one study.
-        second: Per-replicate values from the other.
+        first: Per-replicate values from one study, at least two of them.
+        second: Per-replicate values from the other, at least two of them.
 
     Returns:
         float: The standard error of ``mean(first) - mean(second)``.
+
+    Raises:
+        ValueError: If either study has fewer than two replicates.
     """
     if len(first) < 2 or len(second) < 2:
-        return 0.0
+        raise ValueError(
+            f"a difference of means needs at least two replicates in each "
+            f"study, got {len(first)} and {len(second)}"
+        )
     return math.sqrt(
         float(np.var(first, ddof=1)) / len(first)
         + float(np.var(second, ddof=1)) / len(second)
     )
+
+
+def _relative_sd_error(values: np.ndarray) -> float:
+    """Relative Monte Carlo standard error of a sample standard deviation.
+
+    The delta method gives ``Var(s) / sigma^2 = (kappa - 1) / (4 * n)``, where
+    ``kappa = mu_4 / sigma^4`` is the kurtosis of whatever is being averaged. For
+    a normal sample ``kappa = 3`` and this is the familiar ``1 / (2n)``; for a
+    heavy-tailed one it is larger, and using the normal figure would understate
+    the noise in ``sampling_sd`` and flag correct estimators. A calibrated
+    estimator with scaled Student t(5) sampling error was flagged in about 10% of
+    studies by the normal-only version, against the 0.3% that three sigma
+    advertises.
+
+    ``kappa`` is estimated from the sample but never allowed below 3. The sample
+    kurtosis is an eighth-moment quantity and is heavily downward-biased at the
+    replicate counts a Monte Carlo study runs at, so letting a low estimate
+    *narrow* the band would reintroduce the same failure through the back door,
+    while a high one widening it is exactly the correction that is wanted.
+
+    Args:
+        values: The sample whose standard deviation's noise is wanted.
+
+    Returns:
+        float: The standard error of ``s``, as a fraction of ``s``.
+
+    Raises:
+        ValueError: If there are fewer than two values, which leaves no spread.
+    """
+    count = len(values)
+    if count < 2:
+        raise ValueError(f"a standard deviation needs at least two values, got {count}")
+    sample = np.asarray(values, dtype=float)
+    spread = float(np.std(sample, ddof=1))
+    kurtosis = 3.0
+    if spread:
+        standardised = (sample - float(np.mean(sample))) / spread
+        kurtosis = max(float(np.mean(standardised**4)), 3.0)
+    return math.sqrt((kurtosis - 1.0) / (4.0 * count))
+
+
+def _agresti_caffo_variance(rate: float, reps: int) -> float:
+    """Variance of an observed rate, with one success and one failure added.
+
+    The plug-in Wald variance ``p(1-p)/n`` is exactly zero at ``p`` of 0 or 1,
+    which says a rate observed to be 1.0 is known with certainty -- so a single
+    rejecting replicate against a single non-rejecting one would be a difference
+    of 1.0 with no uncertainty at all. Adding a success and a failure to each arm
+    (Agresti and Caffo, 2000) keeps the variance positive where it matters and is
+    negligible where it does not: at 400 replicates it changes the standard error
+    in the fourth decimal.
+
+    Args:
+        rate: The observed rate.
+        reps: Replicates it was observed over.
+
+    Returns:
+        float: The variance of the adjusted rate.
+    """
+    adjusted_reps = reps + 2
+    adjusted_rate = (rate * reps + 1.0) / adjusted_reps
+    return adjusted_rate * (1.0 - adjusted_rate) / adjusted_reps
 
 
 def _gap_is_unresolved(gap: float, standard_error: float, sigmas: float) -> bool:
@@ -430,8 +503,12 @@ def se_ratio_tolerance(result: MonteCarloResult, sigmas: float = GATE_SIGMAS) ->
       coefficient of variation across replicates. An estimator that reports the
       same standard error every time contributes nothing here.
     * The denominator is a sample standard deviation of ``reps`` draws, whose
-      relative standard error is ``1 / sqrt(2 * (reps - 1))`` -- exactly for
-      normal estimates and closely for anything with a finite fourth moment.
+      relative standard error is ``sqrt((kappa - 1) / (4 * reps))`` for an
+      estimator with kurtosis ``kappa``. That is ``1 / sqrt(2 * reps)`` for a
+      normal estimator and larger for a heavy-tailed one, and the kurtosis is
+      estimated from the study rather than assumed: see ``_relative_sd_error``.
+      Assuming normality here flagged a correct estimator with Student t(5)
+      sampling error in about 10% of studies.
 
     Adding them in quadrature and multiplying by ``sigmas`` gives the band. The
     two are in fact positively correlated for most estimators -- a replicate that
@@ -467,7 +544,9 @@ def se_ratio_tolerance(result: MonteCarloResult, sigmas: float = GATE_SIGMAS) ->
     variation = (
         float(np.std(reported, ddof=1)) / mean_reported if mean_reported else 0.0
     )
-    relative = math.sqrt(variation**2 / result.reps + 1.0 / (2.0 * (result.reps - 1)))
+    relative = math.sqrt(
+        variation**2 / result.reps + _relative_sd_error(result.estimates) ** 2
+    )
     return sigmas * relative
 
 
@@ -609,9 +688,12 @@ def assert_intervals_informative(
     )
     widths = result.widths
     mean_width = result.mean_width
+    # The ratio's numerator is a mean width and its denominator a sampling
+    # standard deviation, so its Monte Carlo noise is the two in quadrature --
+    # the same arithmetic as `se_ratio_tolerance`, on the same reasoning.
     relative = math.sqrt(
         (float(np.var(widths, ddof=1)) / result.reps) / mean_width**2
-        + 1.0 / (2.0 * (result.reps - 1))
+        + _relative_sd_error(result.estimates) ** 2
         if mean_width
         else 0.0
     )
@@ -659,7 +741,10 @@ def assert_narrower(
         sigmas: How many Monte Carlo standard errors the gap must exceed.
 
     Raises:
-        ValueError: If either study recorded no interval endpoints.
+        ValueError: If either study recorded no interval endpoints, or has fewer
+            than two replicates -- one replicate has no estimable spread, so the
+            gate would certify whichever method the single draw happened to
+            favour.
         AssertionError: If the narrower study's intervals are not measurably
             narrower.
     """
@@ -668,6 +753,12 @@ def assert_narrower(
             raise ValueError(
                 f"{label or 'this comparison'}: the `{name}` study recorded no "
                 "interval endpoints, so the two widths cannot be compared"
+            )
+        if study.reps < 2:
+            raise ValueError(
+                f"{label or 'this comparison'}: the `{name}` study has "
+                f"{study.reps} replicate, which has no spread. A width gap "
+                "measured on one draw is not a gap."
             )
     gap = wide.mean_width - narrow.mean_width
     standard_error = _mean_gap_se(wide.widths, narrow.widths)
@@ -752,6 +843,15 @@ def assert_more_powerful(
     Comparing rejection rates under *different* alternatives compares the
     alternatives, not the tests.
 
+    The standard error of the difference is the Agresti-Caffo one -- one success
+    and one failure added to each arm before the Wald formula -- rather than the
+    plug-in Wald standard error, which **collapses to exactly zero at a rejection
+    rate of 0 or 1**. One replicate rejecting against one replicate not rejecting
+    gives a gap of 1.0 with a plug-in standard error of 0, so the plain Wald
+    version certifies a three-sigma difference from two observations. Agresti-
+    Caffo gives that case 2.6 sigma, so it fails, while total separation over
+    four hundred replicates is still hundreds of sigma and still passes.
+
     Args:
         more: The study claimed to be more powerful.
         less: The study it is claimed to beat.
@@ -771,7 +871,8 @@ def assert_more_powerful(
     strong, weak = more.rejection_rate, less.rejection_rate
     gap = strong - weak
     standard_error = math.sqrt(
-        strong * (1.0 - strong) / more.reps + weak * (1.0 - weak) / less.reps
+        _agresti_caffo_variance(strong, more.reps)
+        + _agresti_caffo_variance(weak, less.reps)
     )
     if not _gap_is_unresolved(gap, standard_error, sigmas):
         return
