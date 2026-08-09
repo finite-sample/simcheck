@@ -61,14 +61,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   distribution separates conservatism from vacuity on width alone.
 
 - `assert_narrower`, for the efficiency half of an interval comparison, banded by
-  the Monte Carlo standard error of the difference in mean width.
+  the Monte Carlo standard error of the difference in mean width. A study of one
+  replicate is refused rather than treated as certain.
 
 - `assert_power` and `assert_more_powerful`. The package documented power as one
   of the four questions it answers and had no gate for it; consumers were
   reaching for `assert_proportion`, which is two-sided and needs a nominal you
   already know analytically, or hand-rolling a two-sample standard error.
   `assert_power` is one-sided, because power is a floor and a two-sided band
-  fails a test for being better than claimed.
+  fails a test for being better than claimed. `assert_more_powerful` compares
+  Agresti-Caffo adjusted rates rather than raw ones: the plug-in Wald standard
+  error is exactly zero at a rejection rate of 0 or 1, so one replicate rejecting
+  against one not rejecting would otherwise be a three-sigma finding from two
+  observations.
 
 - **Negative tests for every gate.** Each is exercised on input that satisfies
   its property, where it must stay silent, and on input that violates it, where

@@ -338,6 +338,19 @@ def _relative_sd_error(values: np.ndarray) -> float:
     return math.sqrt((kurtosis - 1.0) / (4.0 * count))
 
 
+def _agresti_caffo_rate(rate: float, reps: int) -> float:
+    """An observed rate with one success and one failure added to it.
+
+    Args:
+        rate: The observed rate.
+        reps: Replicates it was observed over.
+
+    Returns:
+        float: The adjusted rate.
+    """
+    return (rate * reps + 1.0) / (reps + 2)
+
+
 def _agresti_caffo_variance(rate: float, reps: int) -> float:
     """Variance of an observed rate, with one success and one failure added.
 
@@ -532,7 +545,12 @@ def se_ratio_tolerance(result: MonteCarloResult, sigmas: float = GATE_SIGMAS) ->
 
     Raises:
         ValueError: If the study has fewer than two replicates, which leaves the
-            spread -- and so the ratio -- undefined.
+            spread -- and so the ratio -- undefined; or if it reported no usable
+            standard error, in which case there is no ratio for the band to be a
+            band around. Returning NaN in that second case would be worse than
+            raising: a caller writing the obvious check by hand,
+            ``if abs(ratio - 1) > tolerance: raise``, gets ``False`` from every
+            comparison with NaN and so passes silently.
     """
     if result.reps < 2:
         raise ValueError(
@@ -541,6 +559,12 @@ def se_ratio_tolerance(result: MonteCarloResult, sigmas: float = GATE_SIGMAS) ->
         )
     reported = np.asarray(result.standard_errors, dtype=float)
     mean_reported = float(np.mean(reported))
+    if not np.isfinite(mean_reported):
+        raise ValueError(
+            f"this study's reported standard errors average to {mean_reported}, "
+            "so there is no ratio to put a band around. Have the estimator "
+            "report a standard error on every replicate."
+        )
     variation = (
         float(np.std(reported, ddof=1)) / mean_reported if mean_reported else 0.0
     )
@@ -843,14 +867,20 @@ def assert_more_powerful(
     Comparing rejection rates under *different* alternatives compares the
     alternatives, not the tests.
 
-    The standard error of the difference is the Agresti-Caffo one -- one success
-    and one failure added to each arm before the Wald formula -- rather than the
-    plug-in Wald standard error, which **collapses to exactly zero at a rejection
-    rate of 0 or 1**. One replicate rejecting against one replicate not rejecting
-    gives a gap of 1.0 with a plug-in standard error of 0, so the plain Wald
-    version certifies a three-sigma difference from two observations. Agresti-
-    Caffo gives that case 2.6 sigma, so it fails, while total separation over
-    four hundred replicates is still hundreds of sigma and still passes.
+    The comparison is the Agresti-Caffo one: a success and a failure are added to
+    each arm, and **both** the gap and its standard error are computed from the
+    adjusted rates. The plug-in Wald standard error, ``p(1-p)/n``, is exactly zero
+    at a rejection rate of 0 or 1, so one replicate rejecting against one not
+    rejecting would be a difference of 1.0 with no uncertainty at all -- a
+    three-sigma claim from two observations. Adjusting only the variance and not
+    the gap leaves the same hole open when the two studies are different sizes:
+    1 of 1 against 0 of 100 is a raw gap of 1.0, which clears three sigma against
+    an adjusted standard error.
+
+    Adjusted, those two cases are 0.87 and 2.41 sigma and both fail, while total
+    separation over four hundred replicates is still hundreds of sigma and
+    passes. The adjustment is negligible wherever the answer is not in doubt: at
+    400 replicates it moves a rate by a quarter of a percentage point.
 
     Args:
         more: The study claimed to be more powerful.
@@ -869,7 +899,12 @@ def assert_more_powerful(
                 "reject/accept decisions, so the two cannot be compared"
             )
     strong, weak = more.rejection_rate, less.rejection_rate
-    gap = strong - weak
+    # The gap comes from the adjusted rates, not the raw ones. Pairing a raw gap
+    # with an adjusted variance is not the Agresti-Caffo interval and inherits
+    # the defect it is there to fix: one replicate rejecting against a hundred
+    # not rejecting is a raw gap of 1.0 with an adjusted standard error, which
+    # clears three sigma on the strength of a single draw.
+    gap = _agresti_caffo_rate(strong, more.reps) - _agresti_caffo_rate(weak, less.reps)
     standard_error = math.sqrt(
         _agresti_caffo_variance(strong, more.reps)
         + _agresti_caffo_variance(weak, less.reps)
@@ -884,5 +919,6 @@ def assert_more_powerful(
     raise AssertionError(
         f"{label}: rejection rate {strong:.4f} over {more.reps} replicates is "
         f"not measurably above {weak:.4f} over {less.reps}: the gap of "
-        f"{gap:+.4f} is {resolved}, against a gate of {sigmas:g}"
+        f"{gap:+.4f} between the adjusted rates is {resolved}, against a gate of "
+        f"{sigmas:g}"
     )

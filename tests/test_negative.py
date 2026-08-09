@@ -414,6 +414,24 @@ def test_a_calibrated_heavy_tailed_estimator_is_not_flagged():
     assert_se_calibrated(_heavy_tailed_study(400, 0), "the reported counterexample")
 
 
+def test_the_se_tolerance_refuses_a_study_with_no_standard_errors():
+    """A NaN tolerance is worse than no tolerance at all.
+
+    The helper is public, so a caller may write the obvious check by hand --
+    ``if abs(ratio - 1) > tolerance: raise`` -- and every comparison against NaN
+    is False, so that check passes silently on a study that measured nothing.
+    """
+    study = MonteCarloResult(
+        estimates=np.linspace(0.9, 1.1, 100),
+        standard_errors=np.full(100, np.nan),
+        covered=None,
+        rejected=None,
+        truth=1.0,
+    )
+    with pytest.raises(ValueError, match="no ratio to put a band around"):
+        se_ratio_tolerance(study)
+
+
 def test_assert_se_calibrated_says_so_when_no_standard_error_was_reported():
     """A NaN standard error is an absent measurement, not a zero spread.
 
@@ -701,6 +719,20 @@ def test_a_rejection_rate_of_one_is_not_known_with_certainty():
     with pytest.raises(AssertionError, match="not measurably above"):
         assert_more_powerful(
             _decision_study(1.0, reps=1), _decision_study(0.0, reps=1), "one each"
+        )
+
+
+def test_one_replicate_cannot_beat_a_hundred():
+    """Adjusting the variance but not the gap leaves the same hole open.
+
+    One replicate rejecting against a hundred not rejecting is a *raw* gap of
+    1.0, which clears three sigma against an Agresti-Caffo standard error. The
+    adjustment has to be applied to the gap as well, which puts this case at 2.4
+    sigma.
+    """
+    with pytest.raises(AssertionError, match="not measurably above"):
+        assert_more_powerful(
+            _decision_study(1.0, reps=1), _decision_study(0.0, reps=100), "1 v 100"
         )
 
 
