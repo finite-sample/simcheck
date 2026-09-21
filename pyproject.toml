@@ -6,7 +6,6 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Gaurav Sood", email = "gsood07@gmail.com" }]
 requires-python = ">=3.11"
-dynamic = ["version"]
 classifiers = [
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
@@ -14,6 +13,7 @@ classifiers = [
 dependencies = [
     "numpy>=2.4.6",
 ]
+version = "0.1.0"
 
 [project.urls]
 Homepage = "https://github.com/finite-sample/simcheck"
@@ -21,18 +21,8 @@ Documentation = "https://finite-sample.github.io/simcheck/"
 Repository = "https://github.com/finite-sample/simcheck"
 
 [build-system]
-requires = ["hatchling", "uv-dynamic-versioning"]
-build-backend = "hatchling.build"
-
-[tool.hatch.version]
-source = "uv-dynamic-versioning"
-
-[tool.uv-dynamic-versioning]
-vcs = "git"
-style = "pep440"
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/simcheck"]
+requires = ["uv_build>=0.12.5,<0.13"]
+build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
@@ -62,16 +52,15 @@ select = [
     "PTH", "RET", "PIE", "FURB", "PERF", "DTZ", "LOG", "G", "TC", "FLY",
     "RSE", "SLOT", "FA", "A", "EXE", "ICN", "PGH", "PLE", "ARG", "SLF",
 ]
-# D203/D213: the google convention this standard picks. W191/D206/D300:
-# ruff's own docs list these as always incompatible with `ruff format`,
-# which the standard also runs.
+# D203/D213: the google convention the fleet standard picks. W191/D206/D300:
+# ruff's own docs list these as always incompatible with `ruff format`, which
+# the standard also runs.
 ignore = ["D203", "D213", "W191", "D206", "D300"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-# Unused fixture arguments and private-member access are how tests are written.
 "tests/**" = ["S101", "D", "ARG", "SLF"]
 "docs/**" = ["D"]
 
@@ -83,14 +72,23 @@ typeCheckingMode = "standard"
 style = "google"
 arg-type-hints-in-docstring = false
 check-return-types = false
+check-yield-types = false
 check-class-attributes = false
 allow-init-docstring = true
 exclude = '\.venv|tests|docs'
 
 [tool.pytest.ini_options]
+minversion = "8"
+log_level = "INFO"
+xfail_strict = true
+addopts = "-ra --strict-config --strict-markers"
+filterwarnings = ["error"]
 testpaths = ["tests"]
 
 [tool.coverage.run]
 source = ["src"]
 
 [tool.preen]
+
+[tool.uv.build-backend]
+module-name = "simcheck"
