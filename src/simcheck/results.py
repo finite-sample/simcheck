@@ -170,14 +170,16 @@ class MonteCarloResult:
         """Bias in units of its own Monte Carlo standard error.
 
         A t statistic for the null that the estimator is unbiased. When the
-        estimator did not vary, there is no noise for a bias to hide in: the t
-        statistic is zero if every estimate equals the truth and infinite
-        otherwise. Reporting zero for a constant that misses the truth would
-        certify a biased estimator as unbiased because it is *also* deterministic.
+        estimates did not vary it is zero if every one equals the truth and NaN
+        otherwise. NaN, not zero: zero would certify a constant that misses the
+        truth as unbiased. And NaN, not infinity: identical estimates may come
+        from a deterministic estimator, whose miss is a bias, or from a discrete
+        one that happened not to vary in this study, whose miss may be noise the
+        study was too small to see. The study cannot tell which.
         """
         if self.mc_se:
             return self.bias / self.mc_se
-        return math.copysign(math.inf, self.bias) if self.bias else 0.0
+        return math.nan if self.bias else 0.0
 
     @property
     def coverage(self) -> float:

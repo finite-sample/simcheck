@@ -11,8 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `assert_unbiased` passed a deterministic estimator however far it missed the
   truth, because a zero Monte Carlo standard error was reported as a bias t
-  statistic of zero. `bias_t` is now infinite for a constant that misses the
-  truth, and zero only for one that hits it.
+  statistic of zero. Identical estimates that miss the truth now raise
+  `ValueError`, since the study cannot tell a deterministic bias from a
+  discrete estimator that happened not to vary; `bias_t` is NaN for them and
+  zero only when they hit the truth.
 - `assert_unbiased` raises `ValueError` on a single-replicate study instead of
   passing it, as `se_ratio_tolerance` and `assert_narrower` already did.
 

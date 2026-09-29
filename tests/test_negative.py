@@ -248,14 +248,29 @@ def _constant_study(value: float, truth: float, reps: int = 400) -> MonteCarloRe
     )
 
 
-def test_assert_unbiased_fails_on_a_deterministic_biased_estimator():
-    """A constant that misses the truth is biased, with no noise to excuse it.
+def test_assert_unbiased_does_not_pass_a_constant_that_misses_the_truth():
+    """Identical estimates that miss the truth must not pass.
 
     The Monte Carlo standard error is exactly zero here, and the gate used to
     read that as a t statistic of zero -- so returning 5 for a truth of 2 passed.
+    It raises rather than asserting bias, because the same study arises from a
+    discrete unbiased estimator that happened not to vary.
     """
-    with pytest.raises(AssertionError, match=r"\+inf Monte"):
-        assert_unbiased(_constant_study(5.0, truth=2.0), "constant, wrong")
+    study = _constant_study(5.0, truth=2.0)
+    assert np.isnan(study.bias_t)
+    with pytest.raises(ValueError, match="no spread"):
+        assert_unbiased(study, "constant, wrong")
+
+
+def test_assert_unbiased_does_not_call_an_unvarying_discrete_estimator_biased():
+    """An unbiased Bernoulli estimator that never varied is not reported biased.
+
+    With a success probability of 0.001, all 400 draws are zero about two times
+    in three. The estimator is unbiased; the study is too small to show it.
+    """
+    study = _constant_study(0.0, truth=0.001)
+    with pytest.raises(ValueError, match="more replicates"):
+        assert_unbiased(study, "rare Bernoulli")
 
 
 def test_assert_unbiased_passes_a_deterministic_exact_estimator():
