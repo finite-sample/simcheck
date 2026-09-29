@@ -222,6 +222,68 @@ def test_assert_unbiased_fails_on_a_biased_estimator():
         assert_unbiased(_study(bias=0.5, sd=0.1), "biased")
 
 
+def _constant_study(value: float, truth: float, reps: int = 400) -> MonteCarloResult:
+    """An estimator that returns ``value`` on every replicate.
+
+    Parameters
+    ----------
+    value
+        The estimate every replicate reports.
+    truth
+        The true value.
+    reps
+        Replicates.
+
+    Returns
+    -------
+    MonteCarloResult
+        The constructed study.
+    """
+    return MonteCarloResult(
+        estimates=np.full(reps, value),
+        standard_errors=np.full(reps, 0.1),
+        covered=None,
+        rejected=None,
+        truth=truth,
+    )
+
+
+def test_assert_unbiased_does_not_pass_a_constant_that_misses_the_truth():
+    """Identical estimates that miss the truth must not pass.
+
+    The Monte Carlo standard error is exactly zero here, and the gate used to
+    read that as a t statistic of zero -- so returning 5 for a truth of 2 passed.
+    It raises rather than asserting bias, because the same study arises from a
+    discrete unbiased estimator that happened not to vary.
+    """
+    study = _constant_study(5.0, truth=2.0)
+    assert np.isnan(study.bias_t)
+    with pytest.raises(ValueError, match="no spread"):
+        assert_unbiased(study, "constant, wrong")
+
+
+def test_assert_unbiased_does_not_call_an_unvarying_discrete_estimator_biased():
+    """An unbiased Bernoulli estimator that never varied is not reported biased.
+
+    With a success probability of 0.001, all 400 draws are zero about two times
+    in three. The estimator is unbiased; the study is too small to show it.
+    """
+    study = _constant_study(0.0, truth=0.001)
+    with pytest.raises(ValueError, match="more replicates"):
+        assert_unbiased(study, "rare Bernoulli")
+
+
+def test_assert_unbiased_passes_a_deterministic_exact_estimator():
+    """A constant that equals the truth is unbiased, and must not fire."""
+    assert_unbiased(_constant_study(2.0, truth=2.0), "constant, right")
+
+
+def test_assert_unbiased_rejects_a_single_replicate():
+    """One draw cannot separate bias from noise, however far off it lands."""
+    with pytest.raises(ValueError, match="single replicate"):
+        assert_unbiased(_constant_study(1e6, truth=0.0, reps=1), "one draw")
+
+
 def test_assert_unbiased_resolves_smaller_bias_with_more_replicates():
     """The gate must tighten as the study grows, without any edit.
 

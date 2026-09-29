@@ -22,6 +22,7 @@ measure the width against the spread the estimator actually has.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -168,11 +169,17 @@ class MonteCarloResult:
     def bias_t(self) -> float:
         """Bias in units of its own Monte Carlo standard error.
 
-        A t statistic for the null that the estimator is unbiased. Zero when the
-        estimator is deterministic, in which case there is no sampling variation
-        to test against.
+        A t statistic for the null that the estimator is unbiased. When the
+        estimates did not vary it is zero if every one equals the truth and NaN
+        otherwise. NaN, not zero: zero would certify a constant that misses the
+        truth as unbiased. And NaN, not infinity: identical estimates may come
+        from a deterministic estimator, whose miss is a bias, or from a discrete
+        one that happened not to vary in this study, whose miss may be noise the
+        study was too small to see. The study cannot tell which.
         """
-        return self.bias / self.mc_se if self.mc_se else 0.0
+        if self.mc_se:
+            return self.bias / self.mc_se
+        return math.nan if self.bias else 0.0
 
     @property
     def coverage(self) -> float:

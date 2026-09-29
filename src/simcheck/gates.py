@@ -458,14 +458,35 @@ def assert_unbiased(
     bias too small for the study to resolve does not fail, and the study can be
     made more demanding simply by running more replicates.
 
+    A study whose estimates are all equal passes only if they equal the truth.
+    If they miss it, the study has no spread to measure the miss against, and
+    it raises rather than passing: the estimator may be deterministic and
+    biased, or discrete and unlucky, and identical estimates cannot say which.
+
     Args:
         result: A completed Monte Carlo study.
         label: Included in the failure message.
         sigmas: How many Monte Carlo standard errors of slack to allow.
 
     Raises:
+        ValueError: If the study has fewer than two replicates, or if its
+            estimates are all equal and differ from the truth. Either way it has
+            no spread against which to tell bias from noise.
         AssertionError: If the bias t statistic exceeds the gate.
     """
+    if result.reps < 2:
+        raise ValueError(
+            f"{label or 'this study'}: a single replicate has no spread, so its "
+            "distance from the truth cannot be told apart from noise"
+        )
+    if not result.mc_se and result.bias:
+        raise ValueError(
+            f"{label or 'this study'}: all {result.reps} estimates equal "
+            f"{result.bias + result.truth:.6g}, missing the truth by "
+            f"{result.bias:+.6g}, with no spread to measure that against. A "
+            "deterministic estimator is biased by exactly that much; a discrete "
+            "one may need more replicates before it varies."
+        )
     if not abs(result.bias_t) < sigmas:
         raise AssertionError(
             f"{label}: bias {result.bias:+.6f} is {result.bias_t:+.2f} Monte "
