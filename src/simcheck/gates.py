@@ -458,14 +458,25 @@ def assert_unbiased(
     bias too small for the study to resolve does not fail, and the study can be
     made more demanding simply by running more replicates.
 
+    An estimator that returns the same value on every replicate has no Monte
+    Carlo noise, so any difference from the truth is resolved exactly and fails.
+
     Args:
         result: A completed Monte Carlo study.
         label: Included in the failure message.
         sigmas: How many Monte Carlo standard errors of slack to allow.
 
     Raises:
+        ValueError: If the study has fewer than two replicates. One replicate has
+            no estimable spread, so it cannot say whether its distance from the
+            truth is bias or noise.
         AssertionError: If the bias t statistic exceeds the gate.
     """
+    if result.reps < 2:
+        raise ValueError(
+            f"{label or 'this study'}: a single replicate has no spread, so its "
+            "distance from the truth cannot be told apart from noise"
+        )
     if not abs(result.bias_t) < sigmas:
         raise AssertionError(
             f"{label}: bias {result.bias:+.6f} is {result.bias_t:+.2f} Monte "

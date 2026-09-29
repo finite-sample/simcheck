@@ -222,6 +222,53 @@ def test_assert_unbiased_fails_on_a_biased_estimator():
         assert_unbiased(_study(bias=0.5, sd=0.1), "biased")
 
 
+def _constant_study(value: float, truth: float, reps: int = 400) -> MonteCarloResult:
+    """An estimator that returns ``value`` on every replicate.
+
+    Parameters
+    ----------
+    value
+        The estimate every replicate reports.
+    truth
+        The true value.
+    reps
+        Replicates.
+
+    Returns
+    -------
+    MonteCarloResult
+        The constructed study.
+    """
+    return MonteCarloResult(
+        estimates=np.full(reps, value),
+        standard_errors=np.full(reps, 0.1),
+        covered=None,
+        rejected=None,
+        truth=truth,
+    )
+
+
+def test_assert_unbiased_fails_on_a_deterministic_biased_estimator():
+    """A constant that misses the truth is biased, with no noise to excuse it.
+
+    The Monte Carlo standard error is exactly zero here, and the gate used to
+    read that as a t statistic of zero -- so returning 5 for a truth of 2 passed.
+    """
+    with pytest.raises(AssertionError, match=r"\+inf Monte"):
+        assert_unbiased(_constant_study(5.0, truth=2.0), "constant, wrong")
+
+
+def test_assert_unbiased_passes_a_deterministic_exact_estimator():
+    """A constant that equals the truth is unbiased, and must not fire."""
+    assert_unbiased(_constant_study(2.0, truth=2.0), "constant, right")
+
+
+def test_assert_unbiased_rejects_a_single_replicate():
+    """One draw cannot separate bias from noise, however far off it lands."""
+    with pytest.raises(ValueError, match="single replicate"):
+        assert_unbiased(_constant_study(1e6, truth=0.0, reps=1), "one draw")
+
+
 def test_assert_unbiased_resolves_smaller_bias_with_more_replicates():
     """The gate must tighten as the study grows, without any edit.
 
