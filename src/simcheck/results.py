@@ -33,7 +33,7 @@ __all__ = ["MonteCarloResult"]
 
 @dataclass(frozen=True)
 class MonteCarloResult:
-    """Sampling behaviour of an estimator at one point.
+    """Sampling behavior of an estimator at one point.
 
     Args:
         estimates: The estimate from each replicate.

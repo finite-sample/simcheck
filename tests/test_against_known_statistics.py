@@ -1,8 +1,8 @@
-"""The gates, run against estimators whose behaviour is known analytically.
+"""The gates, run against estimators whose behavior is known analytically.
 
 test_negative.py checks that each gate fires on hand-built input. That is not
 enough on its own: a gate could fire correctly on a fixture and still be wrong
-about real sampling behaviour. So these studies use textbook estimators, where
+about real sampling behavior. So these studies use textbook estimators, where
 theory says exactly what should happen, and check that simcheck agrees.
 
 Both directions are exercised. The sample mean is unbiased and its t interval

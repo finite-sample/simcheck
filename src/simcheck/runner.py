@@ -66,7 +66,7 @@ def monte_carlo(
     *,
     seed: int = 0,
 ) -> MonteCarloResult:
-    """Run ``replicate`` many times and collect its sampling behaviour.
+    """Run ``replicate`` many times and collect its sampling behavior.
 
     Args:
         replicate: Called once per replicate with its own generator. It should
@@ -81,7 +81,7 @@ def monte_carlo(
             ``reps`` adds replicates rather than changing the existing ones.
 
     Returns:
-        MonteCarloResult: The recorded sampling behaviour. The interval
+        MonteCarloResult: The recorded sampling behavior. The interval
         endpoints are kept, not only whether each interval covered, because
         coverage on its own cannot tell a calibrated interval from one so wide
         it could not have failed.

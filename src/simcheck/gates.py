@@ -20,7 +20,7 @@ distinguishes a count of 1 from a rate of 1.0; the caller has to say which.
 
 Every gate raises ``AssertionError`` explicitly rather than using an ``assert``
 statement. ``assert`` is removed entirely by ``python -O``, so a package whose
-whole product is assertions would silently pass everything under optimisation --
+whole product is assertions would silently pass everything under optimization --
 the exact failure mode it exists to prevent, in itself. ``test_negative.py``
 runs the gates in an ``-O`` subprocess to keep it that way.
 
@@ -34,7 +34,7 @@ runs the gates in an ``-O`` subprocess to keep it that way.
   :func:`se_ratio_tolerance`.
 * An interval's *width*. Here the reference width is derived from the study
   (:func:`vacuous_width_ratio`), but the multiple of it at which conservatism
-  becomes vacuity is a judgement, and that function's docstring says so plainly
+  becomes vacuity is a judgment, and that function's docstring says so plainly
   rather than presenting a chosen number as a derived one.
 """
 
@@ -275,7 +275,7 @@ def _mean_gap_se(first: np.ndarray, second: np.ndarray) -> float:
 
     A study of one replicate has no estimable variance, and reporting zero for it
     would say the difference is known exactly -- so one replicate would certify
-    whichever method the single draw happened to favour. Callers check the
+    whichever method the single draw happened to favor. Callers check the
     replicate count before getting here.
 
     Args:
@@ -333,8 +333,8 @@ def _relative_sd_error(values: np.ndarray) -> float:
     spread = float(np.std(sample, ddof=1))
     kurtosis = 3.0
     if spread:
-        standardised = (sample - float(np.mean(sample))) / spread
-        kurtosis = max(float(np.mean(standardised**4)), 3.0)
+        standardized = (sample - float(np.mean(sample))) / spread
+        kurtosis = max(float(np.mean(standardized**4)), 3.0)
     return math.sqrt((kurtosis - 1.0) / (4.0 * count))
 
 
@@ -789,7 +789,7 @@ def assert_narrower(
         ValueError: If either study recorded no interval endpoints, or has fewer
             than two replicates -- one replicate has no estimable spread, so the
             gate would certify whichever method the single draw happened to
-            favour.
+            favor.
         AssertionError: If the narrower study's intervals are not measurably
             narrower.
     """
@@ -882,7 +882,7 @@ def assert_more_powerful(
     detect it more often than B. Asserting ``a.rejection_rate > b.rejection_rate``
     instead -- which is what this replaces -- passes on a gap of one replicate in
     four hundred, which is noise, and so certifies whichever method the seed
-    happened to favour.
+    happened to favor.
 
     Both studies must be run at the same alternative, which this cannot check.
     Comparing rejection rates under *different* alternatives compares the

@@ -133,7 +133,7 @@ size stops being able to observe a miss: 1.78 at 100 replicates, 1.96 at 400,
 2.15 at 2000. It rises with the replicate count, which inverts the usual
 direction and is meant to — more replicates resolve rarer failures.
 
-The one thing here that is a judgement rather than a derivation is how many
+The one thing here that is a judgment rather than a derivation is how many
 expected misses per study counts as "could not have failed". Its docstring says
 so, and says why no sampling distribution fixes it: correct procedures occupy the
 whole range of widths above the oracle.
@@ -155,7 +155,7 @@ a target rather than a floor, still belongs in `assert_proportion`.
 `assert_more_powerful` bands the gap between two rejection rates by the standard
 error of the difference. The assertion it replaces — `a.rejection_rate >
 b.rejection_rate` — passes on a gap of one replicate in four hundred and reports
-whichever method the seed favoured as the winner.
+whichever method the seed favored as the winner.
 
 ## Two failure modes this is built to prevent
 
@@ -208,7 +208,7 @@ the package worth anything — a helper that silently passes everything is worse
 than no helper, because it converts an untested codebase into one that reports
 itself as tested.
 
-The gates are also run against estimators whose behaviour is known analytically
+The gates are also run against estimators whose behavior is known analytically
 (`tests/test_against_known_statistics.py`): the sample mean must trip nothing,
 the uncorrected `ddof=0` variance must be caught with its textbook bias of
 `-σ²/n`, a 1.96 interval at n=5 must be caught under-covering at ≈0.875, a

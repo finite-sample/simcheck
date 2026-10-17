@@ -92,3 +92,6 @@ source = ["src"]
 
 [tool.uv.build-backend]
 module-name = "simcheck"
+
+[tool.codespell]
+builtin = "clear,rare,en-GB_to_en-US"

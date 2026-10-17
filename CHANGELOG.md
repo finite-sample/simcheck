@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Initial extraction from `incline/tests/_statistics.py`, generalised so it
+- Initial extraction from `incline/tests/_statistics.py`, generalized so it
   depends on numpy alone rather than on any one estimator's interfaces.
 
 - `MonteCarloResult`, holding one study's per-replicate output and deriving bias,
@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `assert_se_calibrated`, which has no counterpart in the original. Coverage can
   look correct while the reported standard error is wrong, when an inflated
-  standard error is cancelled by a bias; this checks the standard error against
+  standard error is canceled by a bias; this checks the standard error against
   the spread actually observed.
 
 - Tier helpers `reps_for`, `deep_tier`, `FAST_REPS` and `DEEP_REPS`, driven by
@@ -88,7 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Negative tests for every gate.** Each is exercised on input that satisfies
   its property, where it must stay silent, and on input that violates it, where
-  it must raise. Plus gates run against estimators whose behaviour is known
+  it must raise. Plus gates run against estimators whose behavior is known
   analytically: the sample mean trips nothing, the `ddof=0` variance is caught
   with its textbook `-sigma^2/n` bias, a 1.96 interval at n=5 is caught
   under-covering at about 0.875, a two-sided z test shows the power its formula
@@ -108,7 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   12% error in a deep one. Passing `tolerance=` explicitly still overrides it,
   and `se_ratio_tolerance(result)` returns the derived band.
 
-  This changes behaviour for callers that relied on the default. Of the six
+  This changes behavior for callers that relied on the default. Of the six
   consuming repositories only `geoinference` does, and its suite was re-run
   against this branch: 43 passed, 4 subtests passed. Every other consumer passes
   `tolerance=` explicitly or does not call the gate.

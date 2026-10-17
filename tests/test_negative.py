@@ -684,7 +684,7 @@ def test_assert_narrower_refuses_a_one_replicate_comparison():
 
     The Monte Carlo standard error of the difference is zero when either study
     has a single replicate, and a zero standard error reads as certainty -- so
-    the gate would certify whichever method the one draw happened to favour.
+    the gate would certify whichever method the one draw happened to favor.
     """
     single = _interval_study(reps=1, half_width=0.1)
     pair = _interval_study(reps=2, half_width=0.2)
@@ -756,7 +756,7 @@ def test_assert_more_powerful_fails_on_a_gap_that_is_noise():
     """Two points of rejection rate at 400 replicates is a coin flip.
 
     This is the assertion the gate replaces: ``strong > weak`` is satisfied by
-    whichever method the seed favoured, and reports it as a finding.
+    whichever method the seed favored, and reports it as a finding.
     """
     strong, weak = _decision_study(0.52), _decision_study(0.50)
     assert strong.rejection_rate > weak.rejection_rate
