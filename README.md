@@ -1,4 +1,4 @@
-# simcheck
+# simcheck: does your estimator behave as advertised?
 
 **Monte Carlo tests for statistical estimators.**
 
