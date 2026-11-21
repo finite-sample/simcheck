@@ -42,6 +42,22 @@ def _mean_without_interval(rng: np.random.Generator) -> Estimate:
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("reps", [3, 20, 100])
+def test_identical_decimal_estimates_have_exactly_zero_spread(reps):
+    value = 0.1
+    for truth in (value, np.nextafter(value, np.inf)):
+        study = monte_carlo(lambda rng: Estimate(value), truth=truth, reps=reps)
+        assert study.sampling_sd == 0.0
+        assert study.bias == value - truth
+        if truth == value:
+            assert study.bias_t == 0.0
+            assert_unbiased(study, "constant, exact")
+        else:
+            assert np.isnan(study.bias_t)
+            with pytest.raises(ValueError, match="with no spread"):
+                assert_unbiased(study, "constant, one float below truth")
+
+
 def test_the_same_seed_gives_the_same_study():
     """Otherwise a failure cannot be investigated."""
     a = monte_carlo(_mean_with_interval, TRUTH, 200, seed=7)
