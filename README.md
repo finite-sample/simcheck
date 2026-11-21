@@ -11,7 +11,7 @@ Install the statistical package from its GitHub release. The PyPI project named
 `simcheck` is a robotics simulator tool.
 
 ```bash
-pip install "simcheck @ git+https://github.com/finite-sample/simcheck@v0.1.1"
+pip install "simcheck @ git+https://github.com/finite-sample/simcheck@v0.1.2"
 ```
 
 Python 3.11+. Depends on numpy, and nothing else.
