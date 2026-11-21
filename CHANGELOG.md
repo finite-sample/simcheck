@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `Estimate` raises an error naming the missing endpoint when only one bound
+  is supplied. A one-sided interval can use infinity at its unbounded end.
+
 - `assert_unbiased` passed a deterministic estimator however far it missed the
   truth, because a zero Monte Carlo standard error was reported as a bias t
   statistic of zero. Identical estimates that miss the truth now raise
