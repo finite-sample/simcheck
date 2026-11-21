@@ -7,9 +7,10 @@ assert the classical properties: if the assumptions hold, is the estimator
 unbiased, do its intervals cover at the nominal rate, is the test's size right
 under the null, and does it have power under an alternative.
 
+Install the statistical package from its GitHub release. The PyPI project named
+`simcheck` is a robotics simulator tool.
+
 ```bash
-pip install simcheck
-# until the first PyPI release lands:
 pip install "simcheck @ git+https://github.com/finite-sample/simcheck@v0.1.0"
 ```
 
