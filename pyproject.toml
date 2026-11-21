@@ -16,7 +16,7 @@ classifiers = [
 dependencies = [
     "numpy>=2.4.6",
 ]
-version = "0.1.1"
+version = "0.1.2"
 
 [project.urls]
 Homepage = "https://github.com/finite-sample/simcheck"
