@@ -17,7 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   statistic of zero. Identical estimates that miss the truth now raise
   `ValueError`, since the study cannot tell a deterministic bias from a
   discrete estimator that happened not to vary; `bias_t` is NaN for them and
-  zero only when they hit the truth.
+  zero only when they hit the truth. Exact equality is checked before taking
+  the mean and standard deviation, so repeated values such as 0.1 have zero
+  spread even when floating-point summation rounds their mean.
 - `assert_unbiased` raises `ValueError` on a single-replicate study instead of
   passing it, as `se_ratio_tolerance` and `assert_narrower` already did.
 

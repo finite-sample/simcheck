@@ -278,6 +278,22 @@ def test_assert_unbiased_passes_a_deterministic_exact_estimator():
     assert_unbiased(_constant_study(2.0, truth=2.0), "constant, right")
 
 
+@pytest.mark.parametrize("reps", [3, 20, 100])
+def test_identical_decimal_estimates_have_exactly_zero_spread(reps):
+    value = 0.1
+    for truth in (value, np.nextafter(value, np.inf)):
+        study = _constant_study(value, truth=truth, reps=reps)
+        assert study.sampling_sd == 0.0
+        assert study.bias == value - truth
+        if truth == value:
+            assert study.bias_t == 0.0
+            assert_unbiased(study, "constant, exact")
+        else:
+            assert np.isnan(study.bias_t)
+            with pytest.raises(ValueError, match="with no spread"):
+                assert_unbiased(study, "constant, one float below truth")
+
+
 def test_assert_unbiased_rejects_a_single_replicate():
     """One draw cannot separate bias from noise, however far off it lands."""
     with pytest.raises(ValueError, match="single replicate"):
