@@ -127,15 +127,21 @@ class MonteCarloResult:
         """Number of replicates."""
         return len(self.estimates)
 
+    def _all_estimates_equal(self) -> bool:
+        # A floating-point mean can differ from every value in a constant array.
+        return bool(np.all(self.estimates == self.estimates[0]))
+
     @property
     def bias(self) -> float:
         """Mean deviation of the estimate from the truth."""
+        if self._all_estimates_equal():
+            return float(self.estimates[0]) - self.truth
         return float(np.mean(self.estimates) - self.truth)
 
     @property
     def sampling_sd(self) -> float:
         """The estimator's actual spread across replicates."""
-        if self.reps < 2:
+        if self.reps < 2 or self._all_estimates_equal():
             return 0.0
         return float(np.std(self.estimates, ddof=1))
 
@@ -161,8 +167,6 @@ class MonteCarloResult:
         makes ``bias`` interpretable, because a bias smaller than this is
         indistinguishable from simulation noise.
         """
-        if not self.sampling_sd:
-            return 0.0
         return self.sampling_sd / float(np.sqrt(self.reps))
 
     @property
@@ -177,8 +181,9 @@ class MonteCarloResult:
         one that happened not to vary in this study, whose miss may be noise the
         study was too small to see. The study cannot tell which.
         """
-        if self.mc_se:
-            return self.bias / self.mc_se
+        mc_se = self.mc_se
+        if mc_se:
+            return self.bias / mc_se
         return math.nan if self.bias else 0.0
 
     @property
