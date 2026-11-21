@@ -157,7 +157,8 @@ class MonteCarloResult:
         Below one, the estimator is overconfident and its intervals will
         under-cover; above one it is conservative.
         """
-        return self.reported_se / self.sampling_sd if self.sampling_sd else np.nan
+        sampling_sd = self.sampling_sd
+        return self.reported_se / sampling_sd if sampling_sd else np.nan
 
     @property
     def mc_se(self) -> float:
