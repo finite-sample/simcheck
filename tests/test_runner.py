@@ -75,6 +75,30 @@ def test_raising_the_replicate_count_extends_the_study_rather_than_changing_it()
 # --------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    ("lower", "upper", "missing"),
+    [(0.0, None, "upper"), (None, 0.0, "lower")],
+)
+def test_estimate_requires_both_endpoints_when_an_interval_is_supplied(
+    lower, upper, missing
+):
+    with pytest.raises(ValueError, match=missing):
+        Estimate(0.0, lower=lower, upper=upper)
+
+
+@pytest.mark.parametrize(
+    ("lower", "upper", "covered"),
+    [(-np.inf, 0.0, False), (0.0, np.inf, True)],
+)
+def test_one_sided_interval_with_an_explicit_unbounded_end(lower, upper, covered):
+    study = monte_carlo(
+        lambda rng: Estimate(0.0, lower=lower, upper=upper), truth=1.0, reps=4
+    )
+    np.testing.assert_array_equal(study.lowers, [lower] * 4)
+    np.testing.assert_array_equal(study.uppers, [upper] * 4)
+    np.testing.assert_array_equal(study.covered, [covered] * 4)
+
+
 def test_a_study_without_intervals_has_no_coverage_rather_than_zero_coverage():
     """Zero coverage and no coverage are opposite conclusions.
 

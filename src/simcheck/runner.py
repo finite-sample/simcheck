@@ -41,8 +41,9 @@ class Estimate:
         standard_error: The standard error the estimator reported. Leave as NaN
             when it reports none; :func:`~simcheck.assert_se_calibrated` will
             then have nothing to check and will say so.
-        lower: Lower end of the interval, if the estimator produced one.
-        upper: Upper end of the interval.
+        lower: Lower endpoint. Use negative infinity for an unbounded lower end.
+        upper: Upper endpoint. Use positive infinity for an unbounded upper end.
+            Leave both endpoints as None when the estimator reports no interval.
         rejected: Whether the replicate rejected the null, if the estimator
             performs a test.
     """
@@ -52,6 +53,16 @@ class Estimate:
     lower: float | None = None
     upper: float | None = None
     rejected: bool | None = None
+
+    def __post_init__(self) -> None:
+        """Validate the interval endpoint pair.
+
+        Raises:
+            ValueError: If exactly one endpoint is missing.
+        """
+        if (self.lower is None) != (self.upper is None):
+            missing = "lower" if self.lower is None else "upper"
+            raise ValueError(f"interval is missing its {missing} endpoint")
 
     @property
     def has_interval(self) -> bool:
