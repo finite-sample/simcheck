@@ -5,7 +5,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Gaurav Sood" }]
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 keywords = ["Monte Carlo", "simulation", "coverage", "statistical testing"]
 classifiers = [
     "Intended Audience :: Developers",
@@ -46,7 +46,7 @@ docs = [
 
 [tool.ruff]
 line-length = 88
-target-version = "py311"
+target-version = "py313"
 
 [tool.ruff.lint]
 external = ["DOC"]
